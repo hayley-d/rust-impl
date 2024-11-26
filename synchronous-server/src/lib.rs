@@ -73,3 +73,68 @@ pub mod my_socket {
         return Ok(socket);
     }
 }
+
+pub mod my_threadpool {
+    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::sync::{Arc, Mutex};
+    use std::thread::{self, JoinHandle};
+
+    use crate::my_errors::SocketError;
+
+    pub struct ThreadPool {
+        pub workers: Vec<Worker>,
+        pub capacity: usize,
+        tx: Sender<Job>,
+    }
+
+    pub struct Worker {
+        id: usize,
+        thread: JoinHandle<()>,
+    }
+
+    type Job = Box<dyn FnOnce() + Send + 'static>;
+
+    impl ThreadPool {
+        pub fn new(size: usize) -> Result<ThreadPool, SocketError> {
+            if size <= 0 {
+                return Err(SocketError {
+                    msg: String::from("Invalid thread pool size"),
+                });
+            }
+
+            let (tx, rx): (Sender<Job>, Receiver<Job>) = mpsc::channel();
+
+            let rx = Arc::new(Mutex::new(rx));
+            let mut workers: Vec<Worker> = Vec::with_capacity(size);
+            for idx in 0..size {
+                workers.push(Worker::new(idx, Arc::clone(&rx)));
+            }
+
+            return Ok(ThreadPool {
+                workers,
+                capacity: size,
+                tx,
+            });
+        }
+
+        pub fn execute<F>(&self, f: F)
+        where
+            F: FnOnce() + Send + 'static,
+        {
+            let job = Box::new(f);
+            self.tx.send(job).unwrap();
+        }
+    }
+
+    impl Worker {
+        pub fn new(id: usize, rx: Arc<Mutex<Receiver<Job>>>) -> Worker {
+            return Worker {
+                id,
+                thread: thread::spawn(move || loop {
+                    let job = rx.lock().unwrap().recv().unwrap();
+                    job();
+                }),
+            };
+        }
+    }
+}
