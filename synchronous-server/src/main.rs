@@ -12,7 +12,7 @@ use synchronous_server::{
 fn main() -> Result<(), SocketError> {
     let socket = create_socket()?;
     let listener: TcpListener = socket.into();
-    let thread_pool: ThreadPool = ThreadPool::new(5);
+    let thread_pool: ThreadPool = ThreadPool::new(5)?;
 
     for stream in listener.incoming() {
         let stream = match stream {
