@@ -35,9 +35,7 @@ impl<T> Sender<T> {
             inner = self.shared.not_full.wait(inner).unwrap();
         }
         inner.queue.push_back(t);
-        // unlock the mutex
         drop(inner);
-        // wake receiver waiting on a conditon
         self.shared.not_empty.notify_one();
     }
 }
@@ -48,7 +46,6 @@ impl<T> Clone for Sender<T> {
         inner.senders += 1;
         drop(inner);
         return Sender {
-            // we want to clone the arc not the inner inside the arc
             shared: Arc::clone(&self.shared),
         };
     }
@@ -167,7 +164,7 @@ pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
 }
 
 pub fn sync_channel<T>(bound: usize) -> (SyncSender<T>, Receiver<T>) {
-    let shared: Shared<T> = Shared::new();
+    let shared: Shared<T> = Shared::new_bounded(bound);
     let shared = Arc::new(shared);
 
     return (
@@ -176,6 +173,7 @@ pub fn sync_channel<T>(bound: usize) -> (SyncSender<T>, Receiver<T>) {
         },
         Receiver {
             shared: shared.clone(),
+            buffer: VecDeque::new(),
         },
     );
 }
@@ -196,5 +194,12 @@ mod tests {
         let (tx, mut rx) = channel::<()>();
         drop(tx);
         assert_eq!(rx.recv(), None);
+    }
+
+    #[test]
+    fn ping_pong_synced() {
+        let (mut tx, mut rx): (SyncSender<usize>, Receiver<usize>) = sync_channel(7);
+        tx.send(7);
+        assert_eq!(Some(7), rx.recv());
     }
 }
