@@ -81,7 +81,7 @@ pub mod my_threadpool {
 
     use crate::my_errors::SocketError;
 
-    pub enum Message {
+    enum Message {
         NewJob(Job),
         Terminate,
     }
@@ -137,9 +137,9 @@ pub mod my_threadpool {
                 id,
                 thread: Some(thread::spawn(move || loop {
                     let job = match rx.lock().unwrap().recv() {
-                        Ok(Message::NewJob(j)) => j,
-                        Ok(Message::Terminate) => break,
-                        Err(_) => continue,
+                        Some(Message::NewJob(j) => j,
+                        Some(Message::Terminate => break,
+                        None => (),
                     };
                     job();
                 })),
@@ -149,10 +149,6 @@ pub mod my_threadpool {
 
     impl Drop for ThreadPool {
         fn drop(&mut self) {
-            for _ in &self.workers {
-                let _ = self.tx.send(Message::Terminate);
-            }
-
             for worker in &mut self.workers {
                 if let Some(thread) = worker.thread.take() {
                     thread.join().unwrap();
