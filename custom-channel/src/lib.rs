@@ -1,6 +1,29 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
 
+pub struct SyncSender<T> {
+    shared: Arc<Shared<T>>,
+}
+
+impl<T> SyncSender<T> {
+    pub fn send(&mut self, t: T) {
+        let mut inner = self.shared.inner.lock().unwrap();
+        inner.queue.push_back(t);
+        drop(inner);
+        self.shared.not_empty.notify_one();
+    }
+}
+
+impl<T> Clone for SyncSender<T> {
+    fn clone(&self) -> Self {
+        let mut inner = self.shared.inner.lock().unwrap();
+        inner.senders += 1;
+        drop(inner);
+        return SyncSender {
+            shared: Arc::clone(&self.shared),
+        };
+    }
+}
 pub struct Sender<T> {
     shared: Arc<Shared<T>>,
 }
@@ -8,6 +31,9 @@ pub struct Sender<T> {
 impl<T> Sender<T> {
     pub fn send(&mut self, t: T) {
         let mut inner = self.shared.inner.lock().unwrap();
+        if inner.queue.len() > inner.bound {
+            inner = self.shared.not_full.wait(inner).unwrap();
+        }
         inner.queue.push_back(t);
         // unlock the mutex
         drop(inner);
@@ -47,8 +73,11 @@ impl<T> Receiver<T> {
         let mut inner = self.shared.inner.lock().unwrap();
         loop {
             match inner.queue.pop_front() {
-                Some(t) => return Some(t),
-                None if inner.senders == 0 => return None,
+                Some(t) => {
+                    self.shared.not_full.notify_all();
+                    return Some(t);
+                }
+                None if Arc::strong_count(&self.shared) == 1 => return None,
                 None => {
                     // wait on the condition
                     // not a spin lock
@@ -59,14 +88,24 @@ impl<T> Receiver<T> {
     }
 }
 
+impl<T> Iterator for Receiver<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        return self.recv();
+    }
+}
+
 pub struct Inner<T> {
     pub queue: VecDeque<T>,
     pub senders: usize,
+    pub bound: usize,
 }
 
 pub struct Shared<T> {
     pub inner: Mutex<Inner<T>>,
     pub not_empty: Condvar,
+    pub not_full: Condvar,
 }
 
 impl<T> Shared<T> {
@@ -74,6 +113,15 @@ impl<T> Shared<T> {
         return Shared {
             inner: Mutex::new(Inner::new()),
             not_empty: Condvar::new(),
+            not_full: Condvar::new(),
+        };
+    }
+
+    pub fn new_bounded(bound: usize) -> Shared<T> {
+        return Shared {
+            inner: Mutex::new(Inner::new_bounded(bound)),
+            not_empty: Condvar::new(),
+            not_full: Condvar::new(),
         };
     }
 }
@@ -83,6 +131,15 @@ impl<T> Inner<T> {
         return Inner {
             queue: VecDeque::new(),
             senders: 1,
+            bound: 0,
+        };
+    }
+
+    pub fn new_bounded(bound: usize) -> Inner<T> {
+        return Inner {
+            queue: VecDeque::new(),
+            senders: 1,
+            bound,
         };
     }
 }
@@ -92,6 +149,20 @@ pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let shared = Arc::new(shared);
     return (
         Sender {
+            shared: shared.clone(),
+        },
+        Receiver {
+            shared: shared.clone(),
+        },
+    );
+}
+
+pub fn sync_channel<T>(bound: usize) -> (SyncSender<T>, Receiver<T>) {
+    let shared: Shared<T> = Shared::new();
+    let shared = Arc::new(shared);
+
+    return (
+        SyncSender {
             shared: shared.clone(),
         },
         Receiver {
