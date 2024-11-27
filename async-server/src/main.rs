@@ -1,43 +1,46 @@
-use async_server::{my_errors::SocketError, my_socket::create_socket, my_threadpool::ThreadPool};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use async_server::my_errors::Logger;
+use async_server::{my_errors::ErrorType, my_socket::create_socket};
 use std::{fs, thread, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::main]
-async fn main() -> Result<(), SocketError> {
-    let socket = create_socket()?;
+async fn main() -> Result<(), ErrorType> {
+    let logger: Logger = Logger::new("server.log");
+
+    let socket = match create_socket() {
+        Ok(s) => s,
+        Err(e) => {
+            logger.log_error(&e);
+            panic!("Error creating socker, refer to the server log");
+        }
+    };
 
     // Convert std listener into tokio listener
     let std_listener: std::net::TcpListener = socket.into();
     match std_listener.set_nonblocking(true) {
         Ok(s) => s,
         Err(_) => {
-            let error = SocketError {
-                msg: String::from("Error creating socket"),
-            };
-            eprintln!("{}", error);
-            return Err(error);
+            let error = ErrorType::SocketError(String::from("Problem when setting non blocking"));
+            logger.log_error(&error);
         }
     };
 
     let listener = match TcpListener::from_std(std_listener) {
         Ok(l) => l,
         Err(_) => {
-            let error = SocketError {
-                msg: String::from("Error creating socket"),
-            };
-            eprintln!("{}", error);
-            return Err(error);
+            let error =
+                ErrorType::SocketError(String::from("Problem when converting tcp listener"));
+            logger.log_error(&error);
+            panic!("Error converting std::TcpListener to tokio::TcpListener");
         }
     };
 
-    let thread_pool: Arc<ThreadPool> = Arc::new(ThreadPool::new(5)?);
     // Graceful shutdown using signal handling
     let shutdown_signal = tokio::signal::ctrl_c();
+
     tokio::select! {
-        _ = run_server(listener, thread_pool) => {
+        _ = run_server(listener,&logger) => {
             println!("Server has stopped.");
         }
         _ = shutdown_signal => {
@@ -48,24 +51,19 @@ async fn main() -> Result<(), SocketError> {
     Ok(())
 }
 
-async fn run_server(
-    listener: TcpListener,
-    thread_pool: Arc<ThreadPool>,
-) -> Result<(), SocketError> {
+async fn run_server(listener: TcpListener, logger: &Logger) -> Result<(), ErrorType> {
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                let pool = Arc::clone(&thread_pool);
-
-                // Use thread pool for handling the connection
-                pool.execute_async(async move {
+                tokio::spawn(async move {
                     println!("Handling connection from {:?}", addr);
                     handle_connection(stream).await;
                 });
             }
-            Err(e) => {
-                eprintln!("Failed to accept connection: {}", e);
-                continue; // Keep the server running even if there's an error
+            Err(_) => {
+                let error = ErrorType::ConnectionError(String::from("Failed to accept connection"));
+                logger.log_error(&error);
+                continue;
             }
         }
     }
