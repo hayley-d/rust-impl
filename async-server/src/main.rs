@@ -1,7 +1,7 @@
 use async_server::{my_errors::SocketError, my_socket::create_socket, my_threadpool::ThreadPool};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::{fs, io::prelude::*, thread, time::Duration};
+use std::{fs, thread, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -34,39 +34,46 @@ async fn main() -> Result<(), SocketError> {
     };
 
     let thread_pool: Arc<ThreadPool> = Arc::new(ThreadPool::new(5)?);
-    let mut count: usize = 0;
-    loop {
-        if count < 2 {
-            break;
+    // Graceful shutdown using signal handling
+    let shutdown_signal = tokio::signal::ctrl_c();
+    tokio::select! {
+        _ = run_server(listener, thread_pool) => {
+            println!("Server has stopped.");
         }
-        count += 1;
-
-        let (mut stream, mut add): (TcpStream, SocketAddr) = match listener.accept().await {
-            Ok((s, add)) => (s, add),
-            Err(_) => {
-                let error = SocketError {
-                    msg: String::from("Error creating socket"),
-                };
-                eprintln!("{}", error);
-                return Err(error);
-            }
-        };
-
-        let my_pool = Arc::clone(&thread_pool);
-        tokio::spawn(async move {
-            my_pool.execute(async || {
-                handle_connection(stream).await;
-            });
-        });
+        _ = shutdown_signal => {
+            println!("Shutdown signal received. Stopping server...");
+        }
     }
 
     Ok(())
 }
 
+async fn run_server(
+    listener: TcpListener,
+    thread_pool: Arc<ThreadPool>,
+) -> Result<(), SocketError> {
+    loop {
+        match listener.accept().await {
+            Ok((stream, addr)) => {
+                let pool = Arc::clone(&thread_pool);
+
+                // Use thread pool for handling the connection
+                pool.execute_async(async move {
+                    println!("Handling connection from {:?}", addr);
+                    handle_connection(stream).await;
+                });
+            }
+            Err(e) => {
+                eprintln!("Failed to accept connection: {}", e);
+                continue; // Keep the server running even if there's an error
+            }
+        }
+    }
+}
+
 async fn handle_connection(mut stream: TcpStream) {
     let mut buffer = [0; 1024];
     match stream.read(&mut buffer).await {
-        Ok(n) if n == 0 => return,
         Ok(n) => n,
         Err(e) => {
             eprintln!("Failed to read from socket: {:?}", e);
@@ -99,8 +106,5 @@ async fn handle_connection(mut stream: TcpStream) {
 async fn format_response(status_line: &str, contents: String, mut stream: TcpStream) {
     let length: usize = contents.len();
     let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-    match stream.write_all(response.as_bytes()).await {
-        Ok(_) => (),
-        Err(_) => (),
-    };
+    stream.write_all(response.as_bytes()).await.unwrap();
 }

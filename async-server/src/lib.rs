@@ -79,6 +79,8 @@ pub mod my_threadpool {
     use std::sync::{Arc, Mutex};
     use std::thread::{self, JoinHandle};
 
+    use tokio::runtime::Handle;
+
     use crate::my_errors::SocketError;
 
     pub enum Message {
@@ -128,6 +130,16 @@ pub mod my_threadpool {
         {
             let job = Box::new(f);
             self.tx.send(Message::NewJob(job)).unwrap();
+        }
+
+        pub fn execute_async<F>(&self, f: F)
+        where
+            F: std::future::Future<Output = ()> + Send + 'static,
+        {
+            let handle = Handle::current();
+            self.execute(move || {
+                handle.block_on(f);
+            });
         }
     }
 
