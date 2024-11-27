@@ -1,8 +1,14 @@
-use async_server::my_errors::Logger;
-use async_server::{my_errors::ErrorType, my_socket::create_socket};
+use async_server::connection::connections::ConnectionHandler;
+use async_server::connection::my_socket::*;
+use async_server::error::my_errors::{ErrorType, Logger};
+use async_server::shutdown::Message;
+use async_server::Shutdown;
+use std::sync::Arc;
 use std::{fs, thread, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::broadcast::Sender;
+use tokio::sync::{broadcast, Mutex};
 
 #[tokio::main]
 async fn main() -> Result<(), ErrorType> {
@@ -12,52 +18,63 @@ async fn main() -> Result<(), ErrorType> {
         Ok(s) => s,
         Err(e) => {
             logger.log_error(&e);
-            panic!("Error creating socker, refer to the server log");
+            panic!("Error creating socket, refer to the server log");
         }
     };
 
-    // Convert std listener into tokio listener
-    let std_listener: std::net::TcpListener = socket.into();
-    match std_listener.set_nonblocking(true) {
+    let listener = match get_listener(socket) {
         Ok(s) => s,
-        Err(_) => {
-            let error = ErrorType::SocketError(String::from("Problem when setting non blocking"));
-            logger.log_error(&error);
+        Err(e) => {
+            logger.log_error(&e);
+            panic!("Error creating listener, refer to the server log");
         }
     };
 
-    let listener = match TcpListener::from_std(std_listener) {
-        Ok(l) => l,
-        Err(_) => {
-            let error =
-                ErrorType::SocketError(String::from("Problem when converting tcp listener"));
-            logger.log_error(&error);
-            panic!("Error converting std::TcpListener to tokio::TcpListener");
-        }
-    };
+    let (tx, _rx) = broadcast::channel(10);
+    let tx = Arc::new(Mutex::new(tx));
+
+    let mut shutdown = Shutdown::new(Arc::clone(&tx));
 
     // Graceful shutdown using signal handling
     let shutdown_signal = tokio::signal::ctrl_c();
 
     tokio::select! {
-        _ = run_server(listener,&logger) => {
+        _ = run_server(listener,&logger,Arc::clone(&tx)) => {
             println!("Server has stopped.");
         }
         _ = shutdown_signal => {
             println!("Shutdown signal received. Stopping server...");
+            shutdown.initiate_shutdown().await;
         }
     }
 
     Ok(())
 }
 
-async fn run_server(listener: TcpListener, logger: &Logger) -> Result<(), ErrorType> {
+async fn run_server(
+    listener: TcpListener,
+    logger: &Logger,
+    tx: Arc<Mutex<Sender<Message>>>,
+) -> Result<(), ErrorType> {
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
+                let mut connection = ConnectionHandler {
+                    stream,
+                    addr,
+                    shutdown_rx: tx.lock().await.subscribe(),
+                };
+
                 tokio::spawn(async move {
-                    println!("Handling connection from {:?}", addr);
-                    handle_connection(stream).await;
+                    println!("Handling connection from {:?}", connection.addr);
+                    tokio::select! {
+                        _ = handle_connection(connection.stream)=> {
+                            println!("Connection closed");
+                        }
+                        _ = connection.shutdown_rx.recv() => {
+                            println!("Thread shutting down");
+                        }
+                    };
                 });
             }
             Err(_) => {
@@ -70,7 +87,7 @@ async fn run_server(listener: TcpListener, logger: &Logger) -> Result<(), ErrorT
 }
 
 async fn handle_connection(mut stream: TcpStream) {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 4096];
     match stream.read(&mut buffer).await {
         Ok(n) => n,
         Err(e) => {
@@ -90,11 +107,17 @@ async fn handle_connection(mut stream: TcpStream) {
         )
         .await;
     } else if buffer.starts_with(hayley_route) {
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(15));
+        format_response(
+            "HTTP/1.1 200 OK",
+            fs::read_to_string("html/index.html").unwrap(),
+            stream,
+        )
+        .await;
     } else {
         format_response(
             "HTTP/1.1 200 OK",
-            fs::read_to_string("html/hello.html").unwrap(),
+            fs::read_to_string("html/index.html").unwrap(),
             stream,
         )
         .await;
