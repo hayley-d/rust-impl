@@ -6,7 +6,7 @@ pub mod my_socket {
 
     use crate::error::my_errors::ErrorType;
 
-    pub fn create_socket() -> Result<Socket, ErrorType> {
+    pub fn create_socket(port: u16) -> Result<Socket, ErrorType> {
         let socket = match Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP)) {
             Ok(s) => s,
             Err(_) => {
@@ -25,7 +25,7 @@ pub mod my_socket {
             }
         };
 
-        let socket_address = SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 7878, 0, 0);
+        let socket_address = SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), port, 0, 0);
 
         let socket_address = SockAddr::from(socket_address);
         match socket.bind(&socket_address) {
@@ -46,7 +46,7 @@ pub mod my_socket {
             }
         };
 
-        println!("Listening on [::1]:7878...");
+        println!("Listening on [::1]:{port}...");
 
         return Ok(socket);
     }

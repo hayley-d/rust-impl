@@ -1,8 +1,7 @@
-use async_server::connection::connections::ConnectionHandler;
-use async_server::connection::my_socket::*;
-use async_server::error::my_errors::{ErrorType, Logger};
-use async_server::shutdown::Message;
-use async_server::Shutdown;
+use async_server::connection::{connections::*, my_socket::*};
+use async_server::error::my_errors::*;
+use async_server::shutdown::*;
+use std::env;
 use std::sync::Arc;
 use std::{fs, thread, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,11 +9,26 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, Mutex};
 
+const DEFAULT_PORT: u16 = 7878;
+
 #[tokio::main]
 async fn main() -> Result<(), ErrorType> {
     let logger: Logger = Logger::new("server.log");
 
-    let socket = match create_socket() {
+    let port: u16 = match env::args()
+        .nth(1)
+        .unwrap_or_else(|| DEFAULT_PORT.to_string())
+        .parse()
+    {
+        Ok(p) => p,
+        Err(_) => {
+            let error = ErrorType::SocketError(String::from("Problem parsing port"));
+            logger.log_error(&error);
+            DEFAULT_PORT
+        }
+    };
+
+    let socket = match create_socket(port) {
         Ok(s) => s,
         Err(e) => {
             logger.log_error(&e);
