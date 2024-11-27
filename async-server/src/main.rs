@@ -3,9 +3,7 @@ use async_server::error::my_errors::*;
 use async_server::shutdown::*;
 use std::env;
 use std::sync::Arc;
-use std::{fs, thread, time::Duration};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, Mutex};
 
@@ -98,48 +96,4 @@ async fn run_server(
             }
         }
     }
-}
-
-async fn handle_connection(mut stream: TcpStream) {
-    let mut buffer = [0; 4096];
-    match stream.read(&mut buffer).await {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("Failed to read from socket: {:?}", e);
-            return;
-        }
-    };
-
-    let home_route: &[u8] = b"GET / HTTP/1.1";
-    let hayley_route: &[u8] = b"GET /hayley HTTP/1.1";
-
-    if buffer.starts_with(home_route) {
-        format_response(
-            "HTTP/1.1 200 OK",
-            fs::read_to_string("html/index.html").unwrap(),
-            stream,
-        )
-        .await;
-    } else if buffer.starts_with(hayley_route) {
-        thread::sleep(Duration::from_secs(15));
-        format_response(
-            "HTTP/1.1 200 OK",
-            fs::read_to_string("html/index.html").unwrap(),
-            stream,
-        )
-        .await;
-    } else {
-        format_response(
-            "HTTP/1.1 200 OK",
-            fs::read_to_string("html/index.html").unwrap(),
-            stream,
-        )
-        .await;
-    }
-}
-
-async fn format_response(status_line: &str, contents: String, mut stream: TcpStream) {
-    let length: usize = contents.len();
-    let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
-    stream.write_all(response.as_bytes()).await.unwrap();
 }

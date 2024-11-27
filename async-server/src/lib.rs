@@ -5,4 +5,4 @@ pub mod shutdown;
 pub use shutdown::*;
 
 pub mod connection;
-pub use crate::connection::{connections, my_socket};
+pub use crate::connection::{connections::*, my_socket};

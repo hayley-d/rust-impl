@@ -74,6 +74,7 @@ pub mod my_socket {
 pub mod connections {
     #![allow(dead_code, unused_variables)]
 
+    use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use std::thread;
@@ -102,7 +103,7 @@ pub mod connections {
         pub shutdown_rx: broadcast::Receiver<Message>,
     }
 
-    pub async fn handle_connection(mut stream: TcpStream) {
+    async fn handle_connection(mut stream: TcpStream) {
         let mut buffer = [0; 4096];
         match stream.read(&mut buffer).await {
             Ok(n) => n,
@@ -112,15 +113,18 @@ pub mod connections {
             }
         };
 
-        if buffer.starts_with(get_route("Home")) {
+        let home_route: &[u8] = b"GET / HTTP/1.1";
+        let hayley_route: &[u8] = b"GET /hayley HTTP/1.1";
+
+        if buffer.starts_with(home_route) {
             format_response(
                 "HTTP/1.1 200 OK",
                 fs::read_to_string("html/index.html").await.unwrap(),
                 stream,
             )
             .await;
-        } else if buffer.starts_with(get_route("hayley")) {
-            thread::sleep(Duration::from_secs(5));
+        } else if buffer.starts_with(hayley_route) {
+            thread::sleep(Duration::from_secs(15));
             format_response(
                 "HTTP/1.1 200 OK",
                 fs::read_to_string("html/index.html").await.unwrap(),
@@ -137,17 +141,12 @@ pub mod connections {
         }
     }
 
-    pub async fn format_response(status_line: &str, contents: String, mut stream: TcpStream) {
+    async fn format_response(status_line: &str, contents: String, mut stream: TcpStream) {
         let length: usize = contents.len();
         let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
         stream.write_all(response.as_bytes()).await.unwrap();
     }
 
-    pub fn get_route(route: &str) -> &'static [u8] {
-        return match route {
-            "Home" => b"GET / HTTP/1.1",
-            "hayley" => b"GET /hayley HTTP/1.1",
-            _ => b"GET / HTTP/1.1",
-        };
-    }
+    const ROUTES: HashMap<String, &[u8]> =
+        HashMap::from([(String::from("Home"), b"GET / HTTP/1.1")]);
 }
