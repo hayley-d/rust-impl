@@ -128,7 +128,7 @@ pub mod request_validation {
     }
 
     fn check_overflow(data: &[u8]) -> Result<(), ErrorType> {
-        if &data[data.len() - 4..] == b"\r\n\r\n" {
+        if &data[data.len() - 4..] != b"\r\n\r\n" {
             let error: ErrorType = ErrorType::BadRequest(String::from("Request overflow"));
             return Err(error);
         }
@@ -283,7 +283,7 @@ pub mod request_validation {
 
         #[test]
         fn test_check_overflow_invalid() {
-            let invalid_data: &[u8] = b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n\r\n";
+            let invalid_data: &[u8] = b"GET / HTTP/1.1\r\nHost: example.com";
 
             let result: ErrorType = match check_overflow(invalid_data) {
                 Ok(_) => ErrorType::InternalServerError(String::from("Wrong result")),

@@ -83,6 +83,7 @@ pub mod connections {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::{broadcast, Semaphore};
 
+    use crate::request_validation::handle_request;
     use crate::shutdown::Message;
     use crate::{ErrorType, Shutdown};
 
@@ -102,15 +103,21 @@ pub mod connections {
         pub shutdown_rx: broadcast::Receiver<Message>,
     }
 
-    pub async fn handle_connection(mut stream: TcpStream) {
+    pub async fn handle_connection(mut stream: TcpStream) -> Result<(), ErrorType> {
         let mut buffer = [0; 4096];
-        let length_of_req = match stream.read(&mut buffer).await {
+
+        let bytes_read = match stream.read(&mut buffer).await {
             Ok(n) => n,
             Err(e) => {
-                eprintln!("Failed to read from socket: {:?}", e);
-                return;
+                let error: ErrorType =
+                    ErrorType::SocketError(String::from("Failed to read from socket"));
+                return Err(error);
             }
         };
+
+        handle_request(&buffer[..bytes_read])?;
+
+        println!("{:?}", String::from_utf8(buffer[..bytes_read].to_vec()));
 
         if buffer.starts_with(get_route("Home")) {
             format_response(
@@ -135,6 +142,7 @@ pub mod connections {
             )
             .await;
         }
+        return Ok(());
     }
 
     pub async fn format_response(status_line: &str, contents: String, mut stream: TcpStream) {
