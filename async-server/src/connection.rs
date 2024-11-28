@@ -84,7 +84,7 @@ pub mod connections {
     use tokio::sync::{broadcast, Semaphore};
 
     use crate::shutdown::Message;
-    use crate::Shutdown;
+    use crate::{ErrorType, Shutdown};
 
     const MAX_CONNECTIONS: usize = 5;
 
@@ -104,7 +104,7 @@ pub mod connections {
 
     pub async fn handle_connection(mut stream: TcpStream) {
         let mut buffer = [0; 4096];
-        match stream.read(&mut buffer).await {
+        let length_of_req = match stream.read(&mut buffer).await {
             Ok(n) => n,
             Err(e) => {
                 eprintln!("Failed to read from socket: {:?}", e);
@@ -149,5 +149,9 @@ pub mod connections {
             "hayley" => b"GET /hayley HTTP/1.1",
             _ => b"GET / HTTP/1.1",
         };
+    }
+
+    pub fn validate_request(req: &[u8]) -> Result<(), ErrorType> {
+        return Ok(());
     }
 }

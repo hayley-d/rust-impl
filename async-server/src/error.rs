@@ -145,4 +145,43 @@ pub mod my_errors {
                 .expect("Failed to write to log file");
         }
     }
+
+    impl PartialEq for ErrorType {
+        fn eq(&self, other: &Self) -> bool {
+            match self {
+                ErrorType::SocketError(_) => match other {
+                    ErrorType::SocketError(_) => true,
+                    _ => false,
+                },
+                ErrorType::ReadError(_) => match other {
+                    ErrorType::ReadError(_) => true,
+                    _ => false,
+                },
+                ErrorType::WriteError(_) => match other {
+                    ErrorType::WriteError(_) => true,
+                    _ => false,
+                },
+                ErrorType::BadRequest(_) => match other {
+                    ErrorType::BadRequest(_) => true,
+                    _ => false,
+                },
+                ErrorType::NotFound(_) => match other {
+                    ErrorType::NotFound(_) => true,
+                    _ => false,
+                },
+                ErrorType::InternalServerError(_) => match other {
+                    ErrorType::InternalServerError(_) => true,
+                    _ => false,
+                },
+                ErrorType::ProtocolError(_) => match other {
+                    ErrorType::InternalServerError(_) => true,
+                    _ => false,
+                },
+                ErrorType::ConnectionError(_) => match other {
+                    ErrorType::InternalServerError(_) => true,
+                    _ => false,
+                },
+            }
+        }
+    }
 }
