@@ -14,13 +14,23 @@ pub mod my_errors {
         ConnectionError(String),
     }
 
-    #[derive(Debug, Clone)]
-    pub struct SocketError {
-        pub msg: String,
-    }
-
     pub struct Logger {
         log_file: Arc<std::sync::Mutex<std::fs::File>>,
+    }
+
+    impl ErrorType {
+        pub fn get_msg(&self) -> &str {
+            match self {
+                ErrorType::SocketError(msg) => msg,
+                ErrorType::ReadError(msg) => msg,
+                ErrorType::WriteError(msg) => msg,
+                ErrorType::BadRequest(msg) => msg,
+                ErrorType::NotFound(msg) => msg,
+                ErrorType::InternalServerError(msg) => msg,
+                ErrorType::ProtocolError(msg) => msg,
+                ErrorType::ConnectionError(msg) => msg,
+            }
+        }
     }
 
     impl fmt::Display for ErrorType {
@@ -130,7 +140,7 @@ pub mod my_errors {
 
         pub fn log_error(&self, error: &ErrorType) {
             let mut file = self.log_file.lock().unwrap();
-            let log_message = format!("[{}] {}\n", chrono::Utc::now(), error);
+            let log_message = format!("[{}] {:?}\n", chrono::Utc::now(), error);
             file.write_all(log_message.as_bytes())
                 .expect("Failed to write to log file");
         }

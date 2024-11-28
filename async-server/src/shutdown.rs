@@ -43,3 +43,18 @@ impl Clone for Message {
         }
     }
 }
+
+impl PartialEq for Message {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Message::ServerRunning => match other {
+                Message::ServerRunning => true,
+                _ => false,
+            },
+            Message::Terminate => match other {
+                Message::Terminate => true,
+                _ => false,
+            },
+        }
+    }
+}

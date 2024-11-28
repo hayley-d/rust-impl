@@ -1,27 +1,20 @@
-use self::my_socket::{create_socket, get_listener};
-use async_server::connection::*;
-use async_server::error::my_errors::*;
-use socket2::{Socket, Type};
+use std::sync::Arc;
 
-#[test]
-fn test_connection() {
-    let logger: Logger = Logger::new("server.log");
+use async_server::{Message, Shutdown};
+use tokio::sync::{broadcast, Mutex};
 
-    let socket: Socket = match create_socket(7878 as u16) {
-        Ok(s) => s,
-        Err(e) => {
-            logger.log_error(&e);
-            panic!("Error creating socket, refer to the server log");
-        }
-    };
+#[tokio::test]
+async fn test_shutdown() {
+    let (tx, mut rx) = broadcast::channel(10);
+    let tx = Arc::new(Mutex::new(tx));
 
-    assert_eq!(Socket::type(&socket).unwrap(),Type::STREAM);
+    // Create new shutdown
+    let mut shutdown = Shutdown::new(Arc::clone(&tx));
+    // Initiate shutdown
+    assert_eq!(shutdown.is_shutdown(), false);
 
-    let listener = match get_listener(socket) {
-        Ok(s) => s,
-        Err(e) => {
-            logger.log_error(&e);
-            panic!("Error creating listener, refer to the server log");
-        }
-    };
+    shutdown.initiate_shutdown().await;
+
+    assert_eq!(rx.recv().await.unwrap(), Message::Terminate);
+    assert_eq!(shutdown.is_shutdown(), true);
 }
