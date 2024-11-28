@@ -82,6 +82,7 @@ pub mod connections {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::broadcast::Sender;
     use tokio::sync::{broadcast, Mutex, Semaphore};
+    use tokio::time::timeout;
     use tokio::{fs, time};
 
     use crate::request_validation::handle_request;
@@ -107,14 +108,22 @@ pub mod connections {
     pub async fn handle_connection(stream: &mut TcpStream) -> Result<(), ErrorType> {
         let mut buffer = [0; 4096];
 
-        let bytes_read = match stream.read(&mut buffer).await {
-            Ok(n) => n,
-            Err(e) => {
-                let error: ErrorType =
-                    ErrorType::SocketError(String::from("Failed to read from socket"));
-                return Err(error);
-            }
-        };
+        let bytes_read: usize =
+            match timeout(Duration::from_secs(8), stream.read(&mut buffer)).await {
+                Ok(n) => match n {
+                    Ok(n) => n,
+                    Err(e) => {
+                        let error: ErrorType =
+                            ErrorType::ConnectionError(String::from("Connection Timeout"));
+                        return Err(error);
+                    }
+                },
+                Err(e) => {
+                    let error: ErrorType =
+                        ErrorType::SocketError(String::from("Failed to read from socket"));
+                    return Err(error);
+                }
+            };
 
         handle_request(&buffer[..bytes_read])?;
 
@@ -179,6 +188,14 @@ pub mod connections {
                     shutdown_rx: self.shutdown_tx.lock().await.subscribe(),
                 };
 
+                self.shutdown_tx
+                    .lock()
+                    .await
+                    .send(Message::ServerRunning)
+                    .unwrap();
+
+                println!("Permit aquired for :{}", addr);
+
                 tokio::spawn(async move {
                     match handler.run().await {
                         Ok(_) => (),
@@ -186,6 +203,7 @@ pub mod connections {
                             logger.lock().await.log_error(&e);
                         }
                     };
+                    println!("Permit dropped for :{}", handler.addr);
                     drop(permit);
                 });
             }
