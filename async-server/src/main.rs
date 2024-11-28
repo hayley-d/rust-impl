@@ -3,9 +3,7 @@ use async_server::error::my_errors::*;
 use async_server::shutdown::*;
 use std::env;
 use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio::sync::broadcast::Sender;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, Mutex, Semaphore};
 
 const DEFAULT_PORT: u16 = 7878;
 
@@ -50,8 +48,14 @@ async fn main() -> Result<(), ErrorType> {
     // Graceful shutdown using signal handling
     let shutdown_signal = tokio::signal::ctrl_c();
 
+    let listener: Listener = Listener {
+        listener,
+        connection_limit: Arc::new(Semaphore::new(5)),
+        shutdown_tx: Arc::clone(&tx),
+    };
+
     tokio::select! {
-        _ = run_server(listener,&logger,Arc::clone(&tx)) => {
+        _ = run_server(listener,logger) => {
             println!("Server has stopped.");
         }
         _ = shutdown_signal => {
@@ -63,37 +67,8 @@ async fn main() -> Result<(), ErrorType> {
     Ok(())
 }
 
-async fn run_server(
-    listener: TcpListener,
-    logger: &Logger,
-    tx: Arc<Mutex<Sender<Message>>>,
-) -> Result<(), ErrorType> {
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let mut connection = ConnectionHandler {
-                    stream,
-                    addr,
-                    shutdown_rx: tx.lock().await.subscribe(),
-                };
-
-                tokio::spawn(async move {
-                    println!("Handling connection from {:?}", connection.addr);
-                    tokio::select! {
-                        _ = handle_connection(connection.stream)=> {
-                            println!("Connection closed");
-                        }
-                        _ = connection.shutdown_rx.recv() => {
-                            println!("Thread shutting down");
-                        }
-                    };
-                });
-            }
-            Err(_) => {
-                let error = ErrorType::ConnectionError(String::from("Failed to accept connection"));
-                logger.log_error(&error);
-                continue;
-            }
-        }
-    }
+async fn run_server(mut listener: Listener, logger: Logger) -> Result<(), ErrorType> {
+    let logger = Arc::new(Mutex::new(logger));
+    listener.run(Arc::clone(&logger)).await?;
+    return Ok(());
 }

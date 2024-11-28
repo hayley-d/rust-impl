@@ -78,14 +78,15 @@ pub mod connections {
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
-    use tokio::fs;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::{broadcast, Semaphore};
+    use tokio::sync::broadcast::Sender;
+    use tokio::sync::{broadcast, Mutex, Semaphore};
+    use tokio::{fs, time};
 
     use crate::request_validation::handle_request;
     use crate::shutdown::Message;
-    use crate::{ErrorType, Shutdown};
+    use crate::{ErrorType, Logger};
 
     const MAX_CONNECTIONS: usize = 5;
 
@@ -93,7 +94,7 @@ pub mod connections {
     pub struct Listener {
         pub listener: TcpListener,
         pub connection_limit: Arc<Semaphore>,
-        pub shutdown_tx: Shutdown,
+        pub shutdown_tx: Arc<Mutex<Sender<Message>>>,
     }
 
     #[derive(Debug)]
@@ -103,7 +104,7 @@ pub mod connections {
         pub shutdown_rx: broadcast::Receiver<Message>,
     }
 
-    pub async fn handle_connection(mut stream: TcpStream) -> Result<(), ErrorType> {
+    pub async fn handle_connection(stream: &mut TcpStream) -> Result<(), ErrorType> {
         let mut buffer = [0; 4096];
 
         let bytes_read = match stream.read(&mut buffer).await {
@@ -145,7 +146,7 @@ pub mod connections {
         return Ok(());
     }
 
-    pub async fn format_response(status_line: &str, contents: String, mut stream: TcpStream) {
+    pub async fn format_response(status_line: &str, contents: String, stream: &mut TcpStream) {
         let length: usize = contents.len();
         let response = format!("{status_line}\r\nContent-Length: {length}\r\n\r\n{contents}");
         stream.write_all(response.as_bytes()).await.unwrap();
@@ -161,5 +162,84 @@ pub mod connections {
 
     pub fn validate_request(req: &[u8]) -> Result<(), ErrorType> {
         return Ok(());
+    }
+
+    impl Listener {
+        pub async fn run(&mut self, logger: Arc<Mutex<Logger>>) -> Result<(), ErrorType> {
+            loop {
+                let logger = Arc::clone(&logger);
+                // Returns an error when the semaphore has been closed, since I do not close it
+                // unwrap should be safe
+                let permit = self.connection_limit.clone().acquire_owned().await.unwrap();
+
+                let (stream, addr) = self.accept().await?;
+                let mut handler = ConnectionHandler {
+                    stream,
+                    addr,
+                    shutdown_rx: self.shutdown_tx.lock().await.subscribe(),
+                };
+
+                tokio::spawn(async move {
+                    match handler.run().await {
+                        Ok(_) => (),
+                        Err(e) => {
+                            logger.lock().await.log_error(&e);
+                        }
+                    };
+                    drop(permit);
+                });
+            }
+        }
+
+        pub async fn accept(&mut self) -> Result<(TcpStream, SocketAddr), ErrorType> {
+            let mut backoff: usize = 200;
+
+            loop {
+                // If socket it accepted then return the associated handler
+                match self.listener.accept().await {
+                    Ok((stream, addr)) => {
+                        return Ok((stream, addr));
+                    }
+                    Err(_) => {
+                        // Attempt has failed too many times
+                        if backoff > 6000 {
+                            return Err(ErrorType::SocketError(String::from(
+                                "Error establishing connection",
+                            )));
+                        }
+                    }
+                }
+
+                // Exponential backoff to reduce contention
+                time::sleep(Duration::from_millis(backoff as u64)).await;
+                backoff *= 2;
+            }
+        }
+    }
+
+    impl ConnectionHandler {
+        pub async fn run(&mut self) -> Result<(), ErrorType> {
+            let msg: Message = match self.shutdown_rx.recv().await {
+                Ok(m) => m,
+                Err(_) => {
+                    return Err(ErrorType::ConnectionError(String::from(
+                        "Unable to receive message from shutdown sender",
+                    )))
+                }
+            };
+
+            while msg != Message::Terminate {
+                handle_connection(&mut self.stream).await?;
+                let msg: Message = match self.shutdown_rx.recv().await {
+                    Ok(m) => m,
+                    Err(_) => {
+                        return Err(ErrorType::ConnectionError(String::from(
+                            "Unable to receive message from shutdown sender",
+                        )))
+                    }
+                };
+            }
+            return Ok(());
+        }
     }
 }
