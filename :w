@@ -82,6 +82,7 @@ pub mod connections {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::broadcast::Sender;
     use tokio::sync::{broadcast, Mutex, Semaphore};
+    use tokio::time::timeout;
     use tokio::{fs, time};
 
     use crate::request_validation::handle_request;
@@ -109,7 +110,7 @@ pub mod connections {
 
         let bytes_read: usize = match stream.read(&mut buffer).await {
             Ok(n) => match n {
-                0 => return Ok(()),
+                n == 0 => return Ok(()),
                 _ => n,
             },
             Err(e) => {
@@ -121,7 +122,7 @@ pub mod connections {
 
         handle_request(&buffer[..bytes_read])?;
 
-        //println!("{:?}", String::from_utf8(buffer[..bytes_read].to_vec()));
+        println!("{:?}", String::from_utf8(buffer[..bytes_read].to_vec()));
 
         if buffer.starts_with(get_route("Home")) {
             format_response(
@@ -188,7 +189,7 @@ pub mod connections {
                     .send(Message::ServerRunning)
                     .unwrap();
 
-                println!("Permit aquired for :{:?}", permit);
+                println!("Permit aquired for :{}", addr);
 
                 tokio::spawn(async move {
                     match handler.run().await {
@@ -197,7 +198,7 @@ pub mod connections {
                             logger.lock().await.log_error(&e);
                         }
                     };
-                    println!("Permit dropped for :{:?}", permit);
+                    println!("Permit dropped for :{}", handler.addr);
                     drop(permit);
                 });
             }
@@ -242,16 +243,14 @@ pub mod connections {
 
             while msg != Message::Terminate {
                 handle_connection(&mut self.stream).await?;
-                if !self.shutdown_rx.is_empty() {
-                    let msg: Message = match self.shutdown_rx.recv().await {
-                        Ok(m) => m,
-                        Err(_) => {
-                            return Err(ErrorType::ConnectionError(String::from(
-                                "Unable to receive message from shutdown sender",
-                            )))
-                        }
-                    };
-                }
+                let msg: Message = match self.shutdown_rx.recv().await {
+                    Ok(m) => m,
+                    Err(_) => {
+                        return Err(ErrorType::ConnectionError(String::from(
+                            "Unable to receive message from shutdown sender",
+                        )))
+                    }
+                };
             }
             return Ok(());
         }
