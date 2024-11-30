@@ -43,9 +43,34 @@ impl Display for RedisType {
     }
 }
 
+pub fn split_command(command: &str) -> Option<Vec<&str>> {
+    let iter = command.char_indices();
+
+    let mut start: isize = -1;
+
+    for (pos, c) in iter {
+        if c.is_whitespace() {
+            if start == -1 {
+                start = pos as isize;
+                break;
+            }
+        }
+    }
+
+    let start: usize = start as usize;
+    return Some(vec![&command[..start], &command[start + 1..]]);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_test() {
+        let sen1: String = String::from("ECHO Hello world");
+        let res1 = split_command(&sen1).unwrap();
+        assert_eq!(res1, vec!["ECHO", "Hello world"]);
+    }
 
     #[test]
     fn simple_string_test() {
