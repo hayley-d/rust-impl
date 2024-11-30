@@ -1,31 +1,38 @@
 #![allow(unused_imports)]
-use std::io::{BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
-
 use anyhow::Error;
+use std::io::{BufReader, Read, Write};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
-fn main() -> Result<(), Error> {
+const PORT: &str = "127.0.0.1:6379";
+#[tokio::main]
+#[allow(unreachable_code)]
+
+async fn main() -> Result<(), Error> {
+    let listener: TcpListener = TcpListener::bind(PORT).await?;
     println!("Listening on 127.0.0.1:6379");
 
-    let listener: TcpListener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                println!("accepted new connection");
-                let mut buf = [0; 512];
-                loop {
-                    let read_count = stream.read(&mut buf).unwrap();
-                    if read_count == 0 {
-                        break;
-                    }
-                    stream.write(b"+PONG\r\n").unwrap();
-                }
-            }
-            Err(e) => {
-                println!("error: {}", e);
-            }
-        }
-    }
+    loop {
+        let (mut client, _addr) = listener.accept().await?;
+        tokio::spawn(async move {
+            let mut buffer: [u8; 1024] = [0; 1024];
 
+            loop {
+                let bytes_read = client
+                    .read(&mut buffer)
+                    .await
+                    .expect("Failed to read data from client");
+
+                if bytes_read <= 0 {
+                    return;
+                }
+
+                client
+                    .write(b"+PONG\r\n")
+                    .await
+                    .expect("Failed to write to client");
+            }
+        });
+    }
     Ok(())
 }
