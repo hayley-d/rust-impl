@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::str::Chars;
 
 pub enum RedisType {
     SimpleString(String),
@@ -8,6 +9,15 @@ pub enum RedisType {
     Array(Box<[RedisType]>),
     Null,
     Boolean(bool),
+}
+
+pub fn get_redis_command(res: Vec<String>) -> Option<RedisType> {
+    match &res.get(0) {
+        Some(c) => {
+            return None;
+        }
+        None => return None,
+    }
 }
 
 impl Display for RedisType {
@@ -56,9 +66,56 @@ pub fn split_command(command: &str) -> Option<Vec<&str>> {
             }
         }
     }
+    if start == -1 {
+        return None;
+    }
 
     let start: usize = start as usize;
     return Some(vec![&command[..start], &command[start + 1..]]);
+}
+
+#[derive(Debug)]
+pub enum Command {
+    PING(String),
+    ECHO(String),
+    ERROR(String),
+}
+
+impl Command {
+    pub fn new(command: &str, content: String) -> Command {
+        match command.to_uppercase().as_str() {
+            "ECHO" => Command::ECHO(content),
+            "PING" => Command::PING(content),
+            _ => Command::ERROR(content),
+        }
+    }
+
+    pub fn get_response(&mut self) -> RedisType {
+        match &self {
+            Command::ECHO(msg) => RedisType::BulkString(msg.to_string()),
+            Command::PING(_) => RedisType::SimpleString(String::new()),
+            Command::ERROR(msg) => RedisType::Error(msg.to_string()),
+        }
+    }
+}
+
+impl PartialEq for Command {
+    fn eq(&self, other: &Self) -> bool {
+        match &self {
+            Command::ECHO(_) => match other {
+                Command::ECHO(_) => true,
+                _ => false,
+            },
+            Command::PING(_) => match other {
+                Command::PING(_) => true,
+                _ => false,
+            },
+            Command::ERROR(_) => match other {
+                Command::ERROR(_) => true,
+                _ => false,
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -70,6 +127,25 @@ mod tests {
         let sen1: String = String::from("ECHO Hello world");
         let res1 = split_command(&sen1).unwrap();
         assert_eq!(res1, vec!["ECHO", "Hello world"]);
+    }
+
+    #[test]
+    fn test_req_split() {
+        let msg: &str = "*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n";
+        let mut msg: Vec<&str> = msg.split("\r\n").collect();
+        msg.pop();
+        assert_eq!(msg, vec!["*2", "$4", "ECHO", "$3", "hey"]);
+    }
+
+    #[test]
+    fn command_convert_test() {
+        let sen1: String = String::from("ECHO Hello world");
+        let res1: Vec<&str> = split_command(&sen1).unwrap();
+
+        assert_eq!(
+            Command::new(res1[0], res1[1].to_string()),
+            Command::ECHO("Hello world".to_string())
+        );
     }
 
     #[test]
