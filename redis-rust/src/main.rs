@@ -40,7 +40,7 @@ fn handle_connection(mut client: TcpStream, data: Arc<Mutex<Data>>) -> Result<()
 
             let msg: String = String::from_utf8(buffer.to_vec()).unwrap();
 
-            let mut msg: Command = get_redis_command(msg, Arc::clone(&data));
+            let mut msg: Command = get_redis_command(msg, Some(Arc::clone(&data))).await;
             let res: RedisType = msg.get_response();
 
             client

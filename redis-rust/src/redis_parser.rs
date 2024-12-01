@@ -16,7 +16,7 @@ pub enum RedisType {
     Boolean(bool),
 }
 
-pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
+pub async fn get_redis_command(req: String, data: Option<Arc<Mutex<Data>>>) -> Command {
     let mut msg: Vec<&str> = req.split("\r\n").collect();
     msg.pop();
 
@@ -36,7 +36,7 @@ pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
         }
 
         return Command::ECHO(req_msg);
-    } else if req.to_uppercase().contains("GET") {
+    } else if req.to_uppercase().contains("SET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "SET").unwrap() + 1;
         let mut req_msg: Vec<String> = Vec::new();
         for s in index..msg.len() {
@@ -45,10 +45,26 @@ pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
                 req_msg.push(msg[s].to_string());
             }
         }
-        data.lock().await.add(req_msg[0], req_msg[1]);
+        data.unwrap()
+            .lock()
+            .await
+            .add(req_msg[0].to_string(), req_msg[1].to_string());
         return Command::SIMPLE("OK".to_string());
-    } else if req.to_uppercase().contains("SET") {
+    } else if req.to_uppercase().contains("GET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
+        let mut req_msg = String::new();
+        for s in index..msg.len() {
+            let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
+            if !msg[s].contains(&symbols[..]) {
+                req_msg.push_str(msg[s]);
+            }
+        }
+        match data.unwrap().lock().await.get(req_msg) {
+            Some(d) => {
+                return Command::BULK(d.clone());
+            }
+            None => return Command::ERROR("No key in database".to_string()),
+        };
     } else {
         //PING
         return Command::PING(String::new());
@@ -115,6 +131,7 @@ pub enum Command {
     ECHO(String),
     ERROR(String),
     SIMPLE(String),
+    BULK(String),
 }
 
 impl Command {
@@ -123,6 +140,7 @@ impl Command {
             "ECHO" => Command::ECHO(content),
             "PING" => Command::PING(content),
             "SIMPLE" => Command::SIMPLE(content),
+            "BULK" => Command::BULK(content),
             _ => Command::ERROR(content),
         }
     }
@@ -133,6 +151,7 @@ impl Command {
             Command::PING(_) => RedisType::SimpleString(String::from("PONG")),
             Command::ERROR(msg) => RedisType::Error(msg.to_string()),
             Command::SIMPLE(msg) => RedisType::SimpleString(msg.to_string()),
+            Command::BULK(msg) => RedisType::BulkString(msg.to_string()),
         }
     }
 }
@@ -156,12 +175,17 @@ impl PartialEq for Command {
                 Command::SIMPLE(_) => true,
                 _ => false,
             },
+            Command::BULK(_) => match other {
+                Command::BULK(_) => true,
+                _ => false,
+            },
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -179,11 +203,41 @@ mod tests {
         assert_eq!(msg, vec!["*2", "$4", "ECHO", "$3", "hey"]);
     }
 
-    #[test]
-    fn get_command_test() {
+    #[tokio::test]
+    async fn echo_command_test() {
         let msg: String = String::from("*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n");
 
-        assert_eq!(get_redis_command(msg), Command::ECHO(String::from("hey")));
+        assert_eq!(
+            get_redis_command(msg, None).await,
+            Command::ECHO(String::from("hey"))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_command_test() {
+        let data = Arc::new(Mutex::new(Data::new()));
+        data.lock()
+            .await
+            .add(String::from("foo"), String::from("bar"));
+
+        let msg: String = String::from("*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n");
+
+        assert_eq!(
+            get_redis_command(msg, Some(data)).await,
+            Command::BULK(String::from("bar"))
+        );
+    }
+
+    #[tokio::test]
+    async fn set_command_test() {
+        let data = Arc::new(Mutex::new(Data::new()));
+
+        let msg: String = String::from("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
+
+        assert_eq!(
+            get_redis_command(msg, Some(data)).await,
+            Command::SIMPLE(String::from("OK"))
+        );
     }
 
     #[test]
