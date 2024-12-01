@@ -12,10 +12,12 @@ impl Data {
     }
 
     pub fn add(&mut self, key: String, value: String) {
+        println!("Adding key: {} and value: {}", key, value);
         self.data.insert(key, value);
     }
 
     pub fn get(&self, key: String) -> Option<&String> {
+        println!("Getting {} from the hashmap", key);
         return self.data.get(&key);
     }
 

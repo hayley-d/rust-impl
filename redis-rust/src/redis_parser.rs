@@ -57,6 +57,7 @@ pub async fn get_redis_command(req: String, data: Option<Arc<Mutex<Data>>>) -> C
             let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
             if !msg[s].contains(&symbols[..]) {
                 req_msg.push_str(msg[s]);
+                break;
             }
         }
         match data.unwrap().lock().await.get(req_msg) {
@@ -235,8 +236,13 @@ mod tests {
         let msg: String = String::from("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
 
         assert_eq!(
-            get_redis_command(msg, Some(data)).await,
+            get_redis_command(msg, Some(Arc::clone(&data))).await,
             Command::SIMPLE(String::from("OK"))
+        );
+
+        assert_eq!(
+            *(data.lock().await.get(String::from("foo")).unwrap()),
+            "bar".to_string()
         );
     }
 
