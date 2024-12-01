@@ -34,17 +34,13 @@ fn handle_connection(mut client: TcpStream) -> Result<(), Error> {
 
             let msg: String = String::from_utf8(buffer.to_vec()).unwrap();
 
-            //let parts: Vec<&str> = split_command(msg).expect("Error parsing command");
+            let mut msg: Command = get_redis_command(msg);
+            let res: RedisType = msg.get_response();
 
-            //let mut command: Command = Command::new(parts[0], parts[1].to_string());
-
-            //let response: RedisType = command.get_response();
-
-            /*client
-                            .write(response.to_string().as_bytes())
-                            .await
-                            .expect("Failed to write to client");
-            */
+            client
+                .write(res.to_string().as_bytes())
+                .await
+                .expect("Failed to write to client");
         }
     });
 

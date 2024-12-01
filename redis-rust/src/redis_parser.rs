@@ -18,7 +18,8 @@ pub fn get_redis_command(req: String) -> Command {
         let index: usize = msg
             .iter()
             .position(|&s| s.to_uppercase() == "ECHO")
-            .unwrap();
+            .unwrap()
+            + 1;
         let mut req_msg = String::new();
         for s in index..msg.len() {
             let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
