@@ -1,5 +1,10 @@
 use std::fmt::Display;
 use std::str::Chars;
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
+
+use crate::Data;
 
 pub enum RedisType {
     SimpleString(String),
@@ -11,15 +16,17 @@ pub enum RedisType {
     Boolean(bool),
 }
 
-pub fn get_redis_command(req: String) -> Command {
+pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
+    let mut msg: Vec<&str> = req.split("\r\n").collect();
+    msg.pop();
+
     if req.to_uppercase().contains("ECHO") {
-        let mut msg: Vec<&str> = req.split("\r\n").collect();
-        msg.pop();
         let index: usize = msg
             .iter()
             .position(|&s| s.to_uppercase() == "ECHO")
             .unwrap()
             + 1;
+
         let mut req_msg = String::new();
         for s in index..msg.len() {
             let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
@@ -29,6 +36,19 @@ pub fn get_redis_command(req: String) -> Command {
         }
 
         return Command::ECHO(req_msg);
+    } else if req.to_uppercase().contains("GET") {
+        let index: usize = msg.iter().position(|&s| s.to_uppercase() == "SET").unwrap() + 1;
+        let mut req_msg: Vec<String> = Vec::new();
+        for s in index..msg.len() {
+            let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
+            if !msg[s].contains(&symbols[..]) {
+                req_msg.push(msg[s].to_string());
+            }
+        }
+        data.lock().await.add(req_msg[0], req_msg[1]);
+        return Command::SIMPLE("OK".to_string());
+    } else if req.to_uppercase().contains("SET") {
+        let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
     } else {
         //PING
         return Command::PING(String::new());
@@ -94,6 +114,7 @@ pub enum Command {
     PING(String),
     ECHO(String),
     ERROR(String),
+    SIMPLE(String),
 }
 
 impl Command {
@@ -101,6 +122,7 @@ impl Command {
         match command.to_uppercase().as_str() {
             "ECHO" => Command::ECHO(content),
             "PING" => Command::PING(content),
+            "SIMPLE" => Command::SIMPLE(content),
             _ => Command::ERROR(content),
         }
     }
@@ -110,6 +132,7 @@ impl Command {
             Command::ECHO(msg) => RedisType::BulkString(msg.to_string()),
             Command::PING(_) => RedisType::SimpleString(String::from("PONG")),
             Command::ERROR(msg) => RedisType::Error(msg.to_string()),
+            Command::SIMPLE(msg) => RedisType::SimpleString(msg.to_string()),
         }
     }
 }
@@ -127,6 +150,10 @@ impl PartialEq for Command {
             },
             Command::ERROR(_) => match other {
                 Command::ERROR(_) => true,
+                _ => false,
+            },
+            Command::SIMPLE(_) => match other {
+                Command::SIMPLE(_) => true,
                 _ => false,
             },
         }
