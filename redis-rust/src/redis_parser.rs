@@ -11,12 +11,26 @@ pub enum RedisType {
     Boolean(bool),
 }
 
-pub fn get_redis_command(res: Vec<String>) -> Option<RedisType> {
-    match &res.get(0) {
-        Some(c) => {
-            return None;
+pub fn get_redis_command(req: String) -> Command {
+    if req.to_uppercase().contains("ECHO") {
+        let mut msg: Vec<&str> = req.split("\r\n").collect();
+        msg.pop();
+        let index: usize = msg
+            .iter()
+            .position(|&s| s.to_uppercase() == "ECHO")
+            .unwrap();
+        let mut req_msg = String::new();
+        for s in index..msg.len() {
+            let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
+            if !msg[s].contains(&symbols[..]) {
+                req_msg.push_str(msg[s]);
+            }
         }
-        None => return None,
+
+        return Command::ECHO(req_msg);
+    } else {
+        //PING
+        return Command::PING(String::new());
     }
 }
 
@@ -93,7 +107,7 @@ impl Command {
     pub fn get_response(&mut self) -> RedisType {
         match &self {
             Command::ECHO(msg) => RedisType::BulkString(msg.to_string()),
-            Command::PING(_) => RedisType::SimpleString(String::new()),
+            Command::PING(_) => RedisType::SimpleString(String::from("PONG")),
             Command::ERROR(msg) => RedisType::Error(msg.to_string()),
         }
     }
@@ -135,6 +149,13 @@ mod tests {
         let mut msg: Vec<&str> = msg.split("\r\n").collect();
         msg.pop();
         assert_eq!(msg, vec!["*2", "$4", "ECHO", "$3", "hey"]);
+    }
+
+    #[test]
+    fn get_command_test() {
+        let msg: String = String::from("*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n");
+
+        assert_eq!(get_redis_command(msg), Command::ECHO(String::from("hey")));
     }
 
     #[test]

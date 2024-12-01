@@ -33,7 +33,6 @@ fn handle_connection(mut client: TcpStream) -> Result<(), Error> {
             }
 
             let msg: String = String::from_utf8(buffer.to_vec()).unwrap();
-            let msg: Vec<&str> = msg.split("\r\n").collect();
 
             //let parts: Vec<&str> = split_command(msg).expect("Error parsing command");
 
