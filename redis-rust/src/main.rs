@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 //#![allow(unused_imports)]
 use anyhow::Error;
@@ -40,7 +42,24 @@ fn handle_connection(mut client: TcpStream, data: Arc<Mutex<Data>>) -> Result<()
 
             let msg: String = String::from_utf8(buffer.to_vec()).unwrap();
 
-            let mut msg: Command = get_redis_command(msg, Some(Arc::clone(&data))).await;
+            let mut msg: Command = get_redis_command(msg, Arc::clone(&data)).await;
+            if msg.is_delay() {
+                let res: RedisType = msg.get_response();
+                client
+                    .write(res.to_string().as_bytes())
+                    .await
+                    .expect("Failed to write to client");
+
+                thread::sleep(Duration::from_secs(
+                    msg.get_msg().unwrap().parse::<u64>().unwrap(),
+                ));
+                Arc::clone(&data)
+                    .lock()
+                    .await
+                    .remove(msg.get_key().unwrap().to_string());
+                return ();
+            }
+
             let res: RedisType = msg.get_response();
 
             client

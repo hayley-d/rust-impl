@@ -1,7 +1,5 @@
 use std::fmt::Display;
-use std::str::Chars;
 use std::sync::Arc;
-
 use tokio::sync::Mutex;
 
 use crate::Data;
@@ -14,11 +12,14 @@ pub enum RedisType {
     Array(Box<[RedisType]>),
     Null,
     Boolean(bool),
+    NullBulk,
 }
 
-pub async fn get_redis_command(req: String, data: Option<Arc<Mutex<Data>>>) -> Command {
+pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
     let mut msg: Vec<&str> = req.split("\r\n").collect();
     msg.pop();
+    let data = data;
+    let _data = Arc::clone(&data);
 
     if req.to_uppercase().contains("ECHO") {
         let index: usize = msg
@@ -27,49 +28,61 @@ pub async fn get_redis_command(req: String, data: Option<Arc<Mutex<Data>>>) -> C
             .unwrap()
             + 1;
 
-        let mut req_msg = String::new();
-        for s in index..msg.len() {
-            let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
-            if !msg[s].contains(&symbols[..]) {
-                req_msg.push_str(msg[s]);
-            }
-        }
-
-        return Command::ECHO(req_msg);
+        return Command::ECHO(extract_msg(msg, index, None)[0].to_string());
     } else if req.to_uppercase().contains("SET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "SET").unwrap() + 1;
-        let mut req_msg: Vec<String> = Vec::new();
-        for s in index..msg.len() {
-            let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
-            if !msg[s].contains(&symbols[..]) {
-                req_msg.push(msg[s].to_string());
-            }
-        }
-        data.unwrap()
+        let req_msg: Vec<String> = extract_msg(msg, index, None);
+        _data
             .lock()
             .await
             .add(req_msg[0].to_string(), req_msg[1].to_string());
+        if "px" == req_msg[2].to_lowercase() {
+            return Command::DELAY(req_msg[3].parse::<u64>().unwrap(), req_msg[0].clone());
+        }
+
         return Command::SIMPLE("OK".to_string());
     } else if req.to_uppercase().contains("GET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
-        let mut req_msg = String::new();
-        for s in index..msg.len() {
-            let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
-            if !msg[s].contains(&symbols[..]) {
-                req_msg.push_str(msg[s]);
-                break;
-            }
-        }
-        match data.unwrap().lock().await.get(req_msg) {
+
+        let req_msg: Vec<String> = extract_msg(msg, index, None);
+
+        match data.lock().await.get(req_msg[0].to_string()) {
             Some(d) => {
                 return Command::BULK(d.clone());
             }
-            None => return Command::ERROR("No key in database".to_string()),
+            None => return Command::NULLBULK,
         };
     } else {
         //PING
         return Command::PING(String::new());
     }
+}
+
+fn extract_msg(req: Vec<&str>, start: usize, count: Option<usize>) -> Vec<String> {
+    let symbols: Vec<char> = vec!['*', ':', '+', '-', '$', '_', '#'];
+    let mut req_msg: Vec<String> = Vec::new();
+    match count {
+        Some(num) => {
+            let mut count = 0;
+            for s in start..req.len() {
+                if !req[s].contains(&symbols[..]) {
+                    req_msg.push(req[s].to_string());
+                    count += 1;
+                    if count >= num {
+                        break;
+                    }
+                }
+            }
+        }
+        None => {
+            for s in start..req.len() {
+                if !req[s].contains(&symbols[..]) {
+                    req_msg.push(req[s].to_string());
+                }
+            }
+        }
+    }
+    return req_msg;
 }
 
 impl Display for RedisType {
@@ -101,6 +114,9 @@ impl Display for RedisType {
                 true => return write!(f, "#t\r\n"),
                 false => return write!(f, "#f\r\n"),
             },
+            RedisType::NullBulk => {
+                return write!(f, "$-1\r\n");
+            }
         }
     }
 }
@@ -133,6 +149,8 @@ pub enum Command {
     ERROR(String),
     SIMPLE(String),
     BULK(String),
+    NULLBULK,
+    DELAY(u64, String),
 }
 
 impl Command {
@@ -153,6 +171,34 @@ impl Command {
             Command::ERROR(msg) => RedisType::Error(msg.to_string()),
             Command::SIMPLE(msg) => RedisType::SimpleString(msg.to_string()),
             Command::BULK(msg) => RedisType::BulkString(msg.to_string()),
+            Command::NULLBULK => RedisType::NullBulk,
+            Command::DELAY(_, _) => RedisType::SimpleString(String::from("OK")),
+        }
+    }
+
+    pub fn get_msg(&self) -> Option<String> {
+        match &self {
+            Command::ECHO(msg) => Some(msg.clone()),
+            Command::PING(_) => None,
+            Command::ERROR(msg) => Some(msg.clone()),
+            Command::SIMPLE(msg) => Some(msg.clone()),
+            Command::BULK(msg) => Some(msg.clone()),
+            Command::NULLBULK => None,
+            Command::DELAY(msg, _) => Some(msg.to_string()),
+        }
+    }
+
+    pub fn get_key(&self) -> Option<&String> {
+        match &self {
+            Command::DELAY(_, key) => Some(key),
+            _ => None,
+        }
+    }
+
+    pub fn is_delay(&self) -> bool {
+        match &self {
+            Command::DELAY(_, _) => true,
+            _ => false,
         }
     }
 }
@@ -178,6 +224,14 @@ impl PartialEq for Command {
             },
             Command::BULK(_) => match other {
                 Command::BULK(_) => true,
+                _ => false,
+            },
+            Command::NULLBULK => match other {
+                Command::NULLBULK => true,
+                _ => false,
+            },
+            Command::DELAY(_, _) => match other {
+                Command::DELAY(_, _) => true,
                 _ => false,
             },
         }
