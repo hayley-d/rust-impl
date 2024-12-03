@@ -22,14 +22,15 @@ async fn main() -> Result<(), Error> {
 
     let data: Arc<Mutex<Database>> = Arc::new(Mutex::new(Database::new()));
     // add args to the map
-    if args.len() == 4 {
+    if args.len() == 5 {
+        println!("Adding env args to the hash map");
         data.lock()
             .await
-            .add("dir".into(), args.get(1).unwrap().into());
+            .add("dir".into(), args.get(2).unwrap().into());
 
         data.lock()
             .await
-            .add("dbfilename".into(), args.get(3).unwrap().into());
+            .add("dbfilename".into(), args.get(4).unwrap().into());
     }
 
     let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(10);
