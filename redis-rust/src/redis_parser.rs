@@ -57,6 +57,21 @@ pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> Redi
         }
 
         return RedisType::SimpleString("OK".to_string());
+    } else if req.to_uppercase().contains("CONFIG") {
+        let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
+
+        let req_msg: Vec<String> = extract_msg(msg, index, Some(1));
+
+        match data.lock().await.get(req_msg[0].to_string().to_lowercase()) {
+            Some(d) => {
+                let res: [RedisType; 2] = [
+                    RedisType::BulkString(req_msg[0].to_string()),
+                    RedisType::BulkString(d.into()),
+                ];
+                return RedisType::Array(Box::new(res));
+            }
+            None => return RedisType::NullBulk,
+        };
     } else if req.to_uppercase().contains("GET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
 
@@ -298,6 +313,38 @@ mod tests {
         assert_eq!(
             get_redis_response(msg, data).await,
             RedisType::BulkString(String::from("hey"))
+        );
+    }
+
+    #[tokio::test]
+    async fn get_conf_command_test() {
+        let data = Arc::new(Mutex::new(Database::new()));
+        data.lock()
+            .await
+            .add(String::from("dir"), String::from("/tmp/redis-files"));
+
+        data.lock()
+            .await
+            .add(String::from("dbfilename"), String::from("dump.rdb"));
+
+        let msg: String = String::from("*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$3\r\ndir\r\n");
+
+        assert_eq!(
+            get_redis_response(msg, Arc::clone(&data)).await,
+            RedisType::Array(Box::new([
+                RedisType::BulkString(String::from("dir")),
+                RedisType::BulkString(String::from("/tmp/redis-files"))
+            ]))
+        );
+
+        let msg: String = String::from("*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$3\r\ndbfilename\r\n");
+
+        assert_eq!(
+            get_redis_response(msg, data).await,
+            RedisType::Array(Box::new([
+                RedisType::BulkString(String::from("dbfilename")),
+                RedisType::BulkString(String::from("dump.rdb"))
+            ]))
         );
     }
 

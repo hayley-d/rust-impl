@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::Error;
 use redis_starter_rust::db::Database;
 use redis_starter_rust::redis_parser::*;
+use std::env;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -16,7 +17,21 @@ const PORT: &str = "127.0.0.1:6379";
 //#[allow(unreachable_code)]
 
 async fn main() -> Result<(), Error> {
+    // get the dir and file name from env
+    let args: Vec<String> = env::args().collect();
+
     let data: Arc<Mutex<Database>> = Arc::new(Mutex::new(Database::new()));
+    // add args to the map
+    if args.len() == 4 {
+        data.lock()
+            .await
+            .add("dir".into(), args.get(1).unwrap().into());
+
+        data.lock()
+            .await
+            .add("dbfilename".into(), args.get(3).unwrap().into());
+    }
+
     let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(10);
 
     let tx = Arc::new(Mutex::new(tx));
