@@ -23,7 +23,6 @@ async fn main() -> Result<(), Error> {
     let data: Arc<Mutex<Database>> = Arc::new(Mutex::new(Database::new()));
     // add args to the map
     if args.len() == 5 {
-        println!("Adding env args to the hash map");
         data.lock()
             .await
             .add("dir".into(), args.get(2).unwrap().into());
@@ -81,7 +80,13 @@ fn handle_connection(
             println!("Request: {}", request);
 
             // Get the response based on the redis type
-            let response: RedisType = get_redis_response(request, Arc::clone(&data)).await;
+            let response: RedisType = match get_redis_response(request, Arc::clone(&data)).await {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{}", e.message);
+                    RedisType::Error(e.message.clone())
+                }
+            };
 
             // if the response requires delayed operation
             if response.is_delay() {

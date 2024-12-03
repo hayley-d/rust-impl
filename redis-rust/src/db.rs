@@ -12,16 +12,30 @@ impl Database {
     }
 
     pub fn add(&mut self, key: String, value: String) {
-        println!("Adding key: {} and value: {}", key, value);
         self.data.insert(key, value);
     }
 
     pub fn get(&self, key: String) -> Option<&String> {
-        println!("Getting {} from the hashmap", key);
         return self.data.get(&key);
     }
 
     pub fn remove(&mut self, key: String) {
         self.data.remove(&key);
+    }
+
+    pub fn try_get(&self, key: &str) -> Option<()> {
+        match self.data.get(key) {
+            Some(_) => Some(()),
+            None => None,
+        }
+    }
+
+    pub fn get_keys(&self) -> Vec<String> {
+        return self
+            .data
+            .iter()
+            .skip(2)
+            .map(|(k, _)| k.to_string())
+            .collect();
     }
 }

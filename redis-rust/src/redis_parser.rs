@@ -1,15 +1,17 @@
 use std::fmt::Display;
 use std::sync::Arc;
+use tokio::fs::{self, File};
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::sync::Mutex;
 
-use crate::Database;
+use crate::{Database, Error};
 #[derive(Debug)]
 pub enum RedisType {
     SimpleString(String),
     Error(String),
     Integer(String),
     BulkString(String),
-    Array(Box<[RedisType]>),
+    Array(Box<Vec<RedisType>>),
     Null,
     Boolean(bool),
     NullBulk,
@@ -21,8 +23,11 @@ pub struct Message {
     pub key: String,
     pub time: u64,
 }
-
-pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> RedisType {
+#[allow(unreachable_code)]
+pub async fn get_redis_response(
+    req: String,
+    data: Arc<Mutex<Database>>,
+) -> Result<RedisType, Error> {
     // Transform request into a vector
     let mut msg: Vec<&str> = req.split("\r\n").collect();
     msg.pop();
@@ -31,46 +36,59 @@ pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> Redi
     let _data = Arc::clone(&data);
 
     if req.to_uppercase().contains("ECHO") {
+        // Safe to unwrap since we know it contains ECHO
         let index: usize = msg
             .iter()
             .position(|&s| s.to_uppercase() == "ECHO")
             .unwrap()
             + 1;
-        return RedisType::BulkString(extract_msg(msg, index, None)[0].to_string());
+        return Ok(RedisType::BulkString(
+            extract_msg(msg, index, None)[0].to_string(),
+        ));
     } else if req.to_uppercase().contains("SET") {
-        // get the index of the operation type
+        // safe to unwrap since we know it contains SET
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "SET").unwrap() + 1;
+
         // extract the rest of the request message
         let req_msg: Vec<String> = extract_msg(msg, index, None);
-        // add the pair to the database
+
         _data
             .lock()
             .await
             .add(req_msg[0].to_string(), req_msg[1].to_string());
 
-        // if the removal should be scheduled then it is a Delayed type
         if req_msg.len() > 2 && "px" == req_msg[2].to_lowercase() {
-            return RedisType::Delay(Message::new(
+            // safe to unwrap here
+            return Ok(RedisType::Delay(Message::new(
                 req_msg[3].parse::<u64>().unwrap(),
                 req_msg[0].clone(),
-            ));
+            )));
         }
 
-        return RedisType::SimpleString("OK".to_string());
+        return Ok(RedisType::SimpleString("OK".to_string()));
     } else if req.to_uppercase().contains("CONFIG") {
-        let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
+        let mut index: usize = match msg.iter().position(|&s| s.to_uppercase() == "GET") {
+            Some(i) => i,
+            None => {
+                return Err(Error {
+                    message: "Error attaing index for CONFIG command".to_string(),
+                })
+            }
+        };
+
+        index += 1;
 
         let req_msg: Vec<String> = extract_msg(msg, index, Some(1));
 
         match data.lock().await.get(req_msg[0].to_string().to_lowercase()) {
             Some(d) => {
-                let res: [RedisType; 2] = [
+                let res: Vec<RedisType> = vec![
                     RedisType::BulkString(req_msg[0].to_string()),
                     RedisType::BulkString(d.into()),
                 ];
-                return RedisType::Array(Box::new(res));
+                return Ok(RedisType::Array(Box::new(res)));
             }
-            None => return RedisType::NullBulk,
+            None => return Ok(RedisType::NullBulk),
         };
     } else if req.to_uppercase().contains("GET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
@@ -79,13 +97,51 @@ pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> Redi
 
         match data.lock().await.get(req_msg[0].to_string()) {
             Some(d) => {
-                return RedisType::BulkString(d.clone());
+                return Ok(RedisType::BulkString(d.clone()));
             }
-            None => return RedisType::NullBulk,
+            None => return Ok(RedisType::NullBulk),
         };
+    } else if req.to_uppercase().contains("KEYS") {
+        let index: usize = msg
+            .iter()
+            .position(|&s| s.to_uppercase() == "KEYS")
+            .unwrap()
+            + 1;
+
+        let mut path: String = data
+            .lock()
+            .await
+            .get("dir".to_string())
+            .unwrap()
+            .to_string();
+
+        path.push_str("/");
+        path.push_str(data.lock().await.get("dir".to_string()).unwrap());
+
+        let request_params: Vec<String> = extract_regex(msg, index);
+
+        println!("Request Params: {:?}", request_params);
+
+        let mut keys: Vec<RedisType> = Vec::new();
+
+        let contents: String = match fs::read_to_string(path).await {
+            Ok(file) => file,
+            Err(_) => return Ok(RedisType::Error(String::from("Error finding file"))),
+        };
+
+        println!("File contents: {}", contents);
+
+        for key in data.lock().await.get_keys() {
+            keys.push(RedisType::BulkString(key));
+        }
+
+        return Ok(RedisType::Array(Box::new(keys)));
+
+        // get the path to the db file
+        return Ok(RedisType::NullBulk);
     } else {
         //PING
-        return RedisType::SimpleString("PONG".into());
+        return Ok(RedisType::SimpleString("PONG".into()));
     }
 }
 
@@ -112,6 +168,14 @@ fn extract_msg(req: Vec<&str>, start: usize, count: Option<usize>) -> Vec<String
                 }
             }
         }
+    }
+    return req_msg;
+}
+
+fn extract_regex(req: Vec<&str>, start: usize) -> Vec<String> {
+    let mut req_msg: Vec<String> = Vec::new();
+    for s in start..req.len() {
+        req_msg.push(req[s].to_string());
     }
     return req_msg;
 }
@@ -163,8 +227,8 @@ impl Display for RedisType {
             }
             RedisType::Array(elements) => {
                 let mut res: String = String::new();
-                for element in elements {
-                    res.push_str(&element.to_string());
+                for i in 0..elements.len() {
+                    res.push_str(&elements[i].to_string());
                 }
                 return write!(f, "*{}\r\n{}", &elements.len().to_string(), res);
             }
@@ -310,10 +374,8 @@ mod tests {
     async fn echo_command_test() {
         let data = Arc::new(Mutex::new(Database::new()));
         let msg: String = String::from("*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n");
-        assert_eq!(
-            get_redis_response(msg, data).await,
-            RedisType::BulkString(String::from("hey"))
-        );
+        let ans = get_redis_response(msg, data).await.unwrap();
+        assert_eq!(ans, RedisType::BulkString(String::from("hey")));
     }
 
     #[tokio::test]
@@ -328,20 +390,20 @@ mod tests {
             .add(String::from("dbfilename"), String::from("dump.rdb"));
 
         let msg: String = String::from("*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$3\r\ndir\r\n");
-
+        let ans = get_redis_response(msg, Arc::clone(&data)).await.unwrap();
         assert_eq!(
-            get_redis_response(msg, Arc::clone(&data)).await,
-            RedisType::Array(Box::new([
+            ans,
+            RedisType::Array(Box::new(vec![
                 RedisType::BulkString(String::from("dir")),
                 RedisType::BulkString(String::from("/tmp/redis-files"))
             ]))
         );
 
         let msg: String = String::from("*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$3\r\ndbfilename\r\n");
-
+        let ans = get_redis_response(msg, data).await.unwrap();
         assert_eq!(
-            get_redis_response(msg, data).await,
-            RedisType::Array(Box::new([
+            ans,
+            RedisType::Array(Box::new(vec![
                 RedisType::BulkString(String::from("dbfilename")),
                 RedisType::BulkString(String::from("dump.rdb"))
             ]))
@@ -356,11 +418,8 @@ mod tests {
             .add(String::from("foo"), String::from("bar"));
 
         let msg: String = String::from("*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n");
-
-        assert_eq!(
-            get_redis_response(msg, data).await,
-            RedisType::BulkString(String::from("bar"))
-        );
+        let ans = get_redis_response(msg, data).await.unwrap();
+        assert_eq!(ans, RedisType::BulkString(String::from("bar")));
     }
 
     #[tokio::test]
@@ -368,11 +427,8 @@ mod tests {
         let data = Arc::new(Mutex::new(Database::new()));
 
         let msg: String = String::from("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
-
-        assert_eq!(
-            get_redis_response(msg, Arc::clone(&data)).await,
-            RedisType::SimpleString(String::from("OK"))
-        );
+        let ans = get_redis_response(msg, Arc::clone(&data)).await.unwrap();
+        assert_eq!(ans, RedisType::SimpleString(String::from("OK")));
 
         assert_eq!(
             *(data.lock().await.get(String::from("foo")).unwrap()),
@@ -417,7 +473,7 @@ mod tests {
 
     #[test]
     fn array_test_string() {
-        let array: Box<[RedisType]> = Box::new([
+        let array: Box<Vec<RedisType>> = Box::new(vec![
             RedisType::BulkString(String::from("Hello")),
             RedisType::BulkString(String::from("world")),
         ]);
@@ -431,7 +487,7 @@ mod tests {
 
     #[test]
     fn array_test_int() {
-        let array: Box<[RedisType]> = Box::new([
+        let array: Box<Vec<RedisType>> = Box::new(vec![
             RedisType::Integer(String::from("1")),
             RedisType::Integer(String::from("2")),
             RedisType::Integer(String::from("3")),
