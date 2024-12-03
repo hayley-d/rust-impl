@@ -27,8 +27,9 @@ async fn main() -> Result<(), Error> {
     let data_copy = Arc::clone(&data);
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            thread::sleep(Duration::from_secs(msg.time));
+            thread::sleep(Duration::from_millis(msg.time));
             data_copy.lock().await.remove(msg.key);
+            println!("Key value pair has been removed");
         }
     });
 
@@ -61,6 +62,8 @@ fn handle_connection(
             // Convert request into a string
             let request: String = String::from_utf8(buffer.to_vec()).unwrap();
 
+            println!("Request: {}", request);
+
             // Get the response based on the redis type
             let response: RedisType = get_redis_response(request, Arc::clone(&data)).await;
 
@@ -75,6 +78,7 @@ fn handle_connection(
                             .expect("Failed to write to client");
 
                         let _ = Arc::clone(&tx).lock().await.send(message.clone()).await;
+                        continue;
                     }
                     _ => (),
                 }

@@ -49,7 +49,7 @@ pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> Redi
             .add(req_msg[0].to_string(), req_msg[1].to_string());
 
         // if the removal should be scheduled then it is a Delayed type
-        if "px" == req_msg[2].to_lowercase() {
+        if req_msg.len() > 2 && "px" == req_msg[2].to_lowercase() {
             return RedisType::Delay(Message::new(
                 req_msg[3].parse::<u64>().unwrap(),
                 req_msg[0].clone(),
