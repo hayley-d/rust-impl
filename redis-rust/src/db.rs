@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-pub struct Data {
+pub struct Database {
     data: HashMap<String, String>,
 }
 
-impl Data {
+impl Database {
     pub fn new() -> Self {
-        return Data {
+        return Database {
             data: HashMap::new(),
         };
     }

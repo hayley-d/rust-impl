@@ -47,39 +47,43 @@ fn handle_connection(
         let mut buffer: [u8; 1024] = [0; 1024];
 
         loop {
+            // read the bytes into the buffer
             let bytes_read = client
                 .read(&mut buffer)
                 .await
                 .expect("Failed to read data from client");
 
+            // if no bytes were read the conntection is closed
             if bytes_read <= 0 {
                 return ();
             }
 
-            let msg: String = String::from_utf8(buffer.to_vec()).unwrap();
+            // Convert request into a string
+            let request: String = String::from_utf8(buffer.to_vec()).unwrap();
 
-            let mut msg: Command = get_redis_command(msg, Arc::clone(&data)).await;
-            if msg.is_delay() {
+            // Get the response based on the redis type
+            let mut response: RedisType = get_redis_response(msg, Arc::clone(&data)).await;
+
+            // if the response requires delayed operation
+            if response.is_delay() {
                 let my_tx: Arc<Mutex<Sender<Message>>> = Arc::clone(&tx);
                 match &msg {
                     Command::DELAY(message) => {
-                        let res: RedisType = msg.get_response();
+                        let res: RedisType = RedisType::SimpleString(String::from("OK"));
                         client
                             .write(res.to_string().as_bytes())
                             .await
                             .expect("Failed to write to client");
 
-                        my_tx.lock().await.send(message);
+                        my_tx.lock().await.send(message.clone());
                     }
                     _ => (),
                 }
                 return ();
             }
 
-            let res: RedisType = msg.get_response();
-
             client
-                .write(res.to_string().as_bytes())
+                .write(response.to_string().as_bytes())
                 .await
                 .expect("Failed to write to client");
         }

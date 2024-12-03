@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::Data;
+use crate::Database;
 
 pub enum RedisType {
     SimpleString(String),
@@ -13,6 +13,7 @@ pub enum RedisType {
     Null,
     Boolean(bool),
     NullBulk,
+    Delay(Message),
 }
 
 #[derive(Debug)]
@@ -21,10 +22,23 @@ pub struct Message {
     pub time: u64,
 }
 
-pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
+#[derive(Debug)]
+pub enum Command {
+    PING,
+    ECHO(String),
+    ERROR(String),
+    SIMPLE(String),
+    BULK(String),
+    NULLBULK,
+    DELAY(Message),
+}
+
+pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> RedisType {
+    // Transform request into a vector
     let mut msg: Vec<&str> = req.split("\r\n").collect();
     msg.pop();
-    let data = data;
+
+    // clone the arc
     let _data = Arc::clone(&data);
 
     if req.to_uppercase().contains("ECHO") {
@@ -33,23 +47,27 @@ pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
             .position(|&s| s.to_uppercase() == "ECHO")
             .unwrap()
             + 1;
-
-        return Command::ECHO(extract_msg(msg, index, None)[0].to_string());
+        return RedisType::BulkString(extract_msg(msg, index, None)[0].to_string());
     } else if req.to_uppercase().contains("SET") {
+        // get the index of the operation type
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "SET").unwrap() + 1;
+        // extract the rest of the request message
         let req_msg: Vec<String> = extract_msg(msg, index, None);
+        // add the pair to the database
         _data
             .lock()
             .await
             .add(req_msg[0].to_string(), req_msg[1].to_string());
+
+        // if the removal should be scheduled then it is a Delayed type
         if "px" == req_msg[2].to_lowercase() {
-            return Command::DELAY(Message::new(
+            return RedisType::Delay(Message::new(
                 req_msg[3].parse::<u64>().unwrap(),
                 req_msg[0].clone(),
             ));
         }
 
-        return Command::SIMPLE("OK".to_string());
+        return RedisType::SimpleString("OK".to_string());
     } else if req.to_uppercase().contains("GET") {
         let index: usize = msg.iter().position(|&s| s.to_uppercase() == "GET").unwrap() + 1;
 
@@ -57,13 +75,13 @@ pub async fn get_redis_command(req: String, data: Arc<Mutex<Data>>) -> Command {
 
         match data.lock().await.get(req_msg[0].to_string()) {
             Some(d) => {
-                return Command::BULK(d.clone());
+                return RedisType::BulkString(d.clone());
             }
-            None => return Command::NULLBULK,
+            None => return RedisType::NullBulk,
         };
     } else {
         //PING
-        return Command::PING;
+        return RedisType::SimpleString("PONG".into());
     }
 }
 
@@ -97,6 +115,15 @@ fn extract_msg(req: Vec<&str>, start: usize, count: Option<usize>) -> Vec<String
 impl Message {
     pub fn new(time: u64, key: String) -> Self {
         return Message { key, time };
+    }
+}
+
+impl Clone for Message {
+    fn clone(&self) -> Self {
+        return Message {
+            key: self.key.clone(),
+            time: self.time,
+        };
     }
 }
 
@@ -138,6 +165,9 @@ impl Display for RedisType {
             RedisType::NullBulk => {
                 return write!(f, "$-1\r\n");
             }
+            RedisType::Delay(_) => {
+                return write!(f, "$+OK\r\n");
+            }
         }
     }
 }
@@ -163,17 +193,6 @@ pub fn split_command(command: &str) -> Option<Vec<&str>> {
     return Some(vec![&command[..start], &command[start + 1..]]);
 }
 
-#[derive(Debug)]
-pub enum Command {
-    PING,
-    ECHO(String),
-    ERROR(String),
-    SIMPLE(String),
-    BULK(String),
-    NULLBULK,
-    DELAY(Message),
-}
-
 impl Command {
     pub fn new(command: &str, content: String) -> Command {
         match command.to_uppercase().as_str() {
@@ -185,7 +204,7 @@ impl Command {
         }
     }
 
-    pub fn get_response(&mut self) -> RedisType {
+    pub fn get_response(&self) -> RedisType {
         match &self {
             Command::ECHO(msg) => RedisType::BulkString(msg.to_string()),
             Command::PING => RedisType::SimpleString(String::from("PONG")),
@@ -206,20 +225,6 @@ impl Command {
             Command::BULK(msg) => Some(msg.clone()),
             Command::NULLBULK => None,
             Command::DELAY(message) => Some(message.time.to_string()),
-        }
-    }
-
-    pub fn get_key(&self) -> Option<&String> {
-        match &self {
-            Command::DELAY(message) => Some(&message.key),
-            _ => None,
-        }
-    }
-
-    pub fn is_delay(&self) -> bool {
-        match &self {
-            Command::DELAY(_) => true,
-            _ => false,
         }
     }
 }
