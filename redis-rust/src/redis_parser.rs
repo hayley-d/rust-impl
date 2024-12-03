@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::Database;
-
+#[derive(Debug)]
 pub enum RedisType {
     SimpleString(String),
     Error(String),
@@ -20,17 +20,6 @@ pub enum RedisType {
 pub struct Message {
     pub key: String,
     pub time: u64,
-}
-
-#[derive(Debug)]
-pub enum Command {
-    PING,
-    ECHO(String),
-    ERROR(String),
-    SIMPLE(String),
-    BULK(String),
-    NULLBULK,
-    DELAY(Message),
 }
 
 pub async fn get_redis_response(req: String, data: Arc<Mutex<Database>>) -> RedisType {
@@ -133,6 +122,15 @@ impl PartialEq for Message {
     }
 }
 
+impl RedisType {
+    pub fn is_delay(&self) -> bool {
+        match self {
+            RedisType::Delay(_) => true,
+            _ => false,
+        }
+    }
+}
+
 impl Display for RedisType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
@@ -172,6 +170,86 @@ impl Display for RedisType {
     }
 }
 
+impl PartialEq for RedisType {
+    fn eq(&self, other: &Self) -> bool {
+        match &self {
+            RedisType::SimpleString(msg) => match other {
+                RedisType::SimpleString(msg2) => {
+                    if msg == msg2 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            RedisType::Error(msg) => match other {
+                RedisType::Error(msg2) => {
+                    if msg == msg2 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            RedisType::Integer(msg) => match other {
+                RedisType::Integer(msg2) => {
+                    if msg == msg2 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            RedisType::BulkString(msg) => match other {
+                RedisType::BulkString(msg2) => {
+                    if msg == msg2 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            RedisType::Array(elements) => match other {
+                RedisType::Array(elements2) => {
+                    if elements == elements2 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            RedisType::Null => match other {
+                RedisType::Null => true,
+                _ => false,
+            },
+            RedisType::Boolean(msg) => match other {
+                RedisType::Boolean(msg2) => {
+                    if msg == msg2 {
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            },
+            RedisType::NullBulk => match other {
+                RedisType::NullBulk => true,
+                _ => false,
+            },
+
+            RedisType::Delay(_) => match other {
+                RedisType::Delay(_) => true,
+                _ => false,
+            },
+        }
+    }
+}
+
 pub fn split_command(command: &str) -> Option<Vec<&str>> {
     let iter = command.char_indices();
 
@@ -191,107 +269,6 @@ pub fn split_command(command: &str) -> Option<Vec<&str>> {
 
     let start: usize = start as usize;
     return Some(vec![&command[..start], &command[start + 1..]]);
-}
-
-impl Command {
-    pub fn new(command: &str, content: String) -> Command {
-        match command.to_uppercase().as_str() {
-            "ECHO" => Command::ECHO(content),
-            "PING" => Command::PING,
-            "SIMPLE" => Command::SIMPLE(content),
-            "BULK" => Command::BULK(content),
-            _ => Command::ERROR(content),
-        }
-    }
-
-    pub fn get_response(&self) -> RedisType {
-        match &self {
-            Command::ECHO(msg) => RedisType::BulkString(msg.to_string()),
-            Command::PING => RedisType::SimpleString(String::from("PONG")),
-            Command::ERROR(msg) => RedisType::Error(msg.to_string()),
-            Command::SIMPLE(msg) => RedisType::SimpleString(msg.to_string()),
-            Command::BULK(msg) => RedisType::BulkString(msg.to_string()),
-            Command::NULLBULK => RedisType::NullBulk,
-            Command::DELAY(_) => RedisType::SimpleString(String::from("OK")),
-        }
-    }
-
-    pub fn get_msg(&self) -> Option<String> {
-        match &self {
-            Command::ECHO(msg) => Some(msg.clone()),
-            Command::PING => None,
-            Command::ERROR(msg) => Some(msg.clone()),
-            Command::SIMPLE(msg) => Some(msg.clone()),
-            Command::BULK(msg) => Some(msg.clone()),
-            Command::NULLBULK => None,
-            Command::DELAY(message) => Some(message.time.to_string()),
-        }
-    }
-}
-
-impl PartialEq for Command {
-    fn eq(&self, other: &Self) -> bool {
-        match &self {
-            Command::ECHO(msg1) => match other {
-                Command::ECHO(msg2) => {
-                    if msg1 == msg2 {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
-            Command::PING => match other {
-                Command::PING => true,
-                _ => false,
-            },
-            Command::ERROR(msg1) => match other {
-                Command::ERROR(msg2) => {
-                    if msg1 == msg2 {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
-            Command::SIMPLE(msg1) => match other {
-                Command::SIMPLE(msg2) => {
-                    if msg1 == msg2 {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
-            Command::BULK(msg1) => match other {
-                Command::BULK(msg2) => {
-                    if msg1 == msg2 {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
-            Command::NULLBULK => match other {
-                Command::NULLBULK => true,
-                _ => false,
-            },
-            Command::DELAY(message1) => match other {
-                Command::DELAY(message2) => {
-                    if message1 == message2 {
-                        true
-                    } else {
-                        false
-                    }
-                }
-                _ => false,
-            },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -316,17 +293,17 @@ mod tests {
 
     #[tokio::test]
     async fn echo_command_test() {
-        let data = Arc::new(Mutex::new(Data::new()));
+        let data = Arc::new(Mutex::new(Database::new()));
         let msg: String = String::from("*2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n");
         assert_eq!(
-            get_redis_command(msg, data).await,
-            Command::ECHO(String::from("hey"))
+            get_redis_response(msg, data).await,
+            RedisType::BulkString(String::from("hey"))
         );
     }
 
     #[tokio::test]
     async fn get_command_test() {
-        let data = Arc::new(Mutex::new(Data::new()));
+        let data = Arc::new(Mutex::new(Database::new()));
         data.lock()
             .await
             .add(String::from("foo"), String::from("bar"));
@@ -334,20 +311,20 @@ mod tests {
         let msg: String = String::from("*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n");
 
         assert_eq!(
-            get_redis_command(msg, data).await,
-            Command::BULK(String::from("bar"))
+            get_redis_response(msg, data).await,
+            RedisType::BulkString(String::from("bar"))
         );
     }
 
     #[tokio::test]
     async fn set_command_test() {
-        let data = Arc::new(Mutex::new(Data::new()));
+        let data = Arc::new(Mutex::new(Database::new()));
 
         let msg: String = String::from("*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
 
         assert_eq!(
-            get_redis_command(msg, Arc::clone(&data)).await,
-            Command::SIMPLE(String::from("OK"))
+            get_redis_response(msg, Arc::clone(&data)).await,
+            RedisType::SimpleString(String::from("OK"))
         );
 
         assert_eq!(
@@ -362,8 +339,8 @@ mod tests {
         let res1: Vec<&str> = split_command(&sen1).unwrap();
 
         assert_eq!(
-            Command::new(res1[0], res1[1].to_string()),
-            Command::ECHO("Hello world".to_string())
+            RedisType::BulkString(res1[1].to_string()),
+            RedisType::BulkString("Hello world".to_string())
         );
     }
 
