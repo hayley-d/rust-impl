@@ -23,13 +23,11 @@ async fn main() -> Result<(), Error> {
     let data: Arc<Mutex<Database>> = Arc::new(Mutex::new(Database::new()));
     // add args to the map
     if args.len() == 5 {
-        data.lock()
-            .await
-            .add("dir".into(), args.get(2).unwrap().into());
+        data.lock().await.add("dir".into(), args.get(2).unwrap());
 
         data.lock()
             .await
-            .add("dbfilename".into(), args.get(4).unwrap().into());
+            .add("dbfilename".into(), args.get(4).unwrap());
     }
 
     let (tx, mut rx): (Sender<Message>, Receiver<Message>) = channel(10);
@@ -43,7 +41,7 @@ async fn main() -> Result<(), Error> {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             thread::sleep(Duration::from_millis(msg.time));
-            data_copy.lock().await.remove(msg.key);
+            data_copy.lock().await.remove(&msg.key);
             println!("Key value pair has been removed");
         }
     });
@@ -80,11 +78,11 @@ fn handle_connection(
             println!("Request: {}", request);
 
             // Get the response based on the redis type
-            let response: RedisType = match get_redis_response(request, Arc::clone(&data)).await {
+            let response: RedisType = match get_redis_response(&request, Arc::clone(&data)).await {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{}", e.message);
-                    RedisType::Error(e.message.clone())
+                    RedisType::Error(e.message.to_string())
                 }
             };
 
@@ -92,7 +90,7 @@ fn handle_connection(
             if response.is_delay() {
                 match &response {
                     RedisType::Delay(message) => {
-                        let res: RedisType = RedisType::SimpleString(String::from("OK"));
+                        let res: RedisType = RedisType::SimpleString("OK");
                         client
                             .write(res.to_string().as_bytes())
                             .await

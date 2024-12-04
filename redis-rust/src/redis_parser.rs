@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use std::fmt::Display;
 use std::sync::Arc;
 use tokio::fs::{self, File};
@@ -8,19 +9,19 @@ use crate::{Database, Error};
 #[derive(Debug)]
 pub enum RedisType<'a> {
     SimpleString(&'a str),
-    Error(&'a str),
+    Error(String),
     Integer(String),
     BulkString(String),
     Array(Box<Vec<RedisType<'a>>>),
     Null,
     Boolean(bool),
     NullBulk,
-    Delay(Message<'a>),
+    Delay(Message),
 }
 
 #[derive(Debug)]
-pub struct Message<'a> {
-    pub key: &'a str,
+pub struct Message {
+    pub key: String,
     pub time: u64,
 }
 #[allow(unreachable_code)]
@@ -62,7 +63,7 @@ pub async fn get_redis_response<'a>(
             // safe to unwrap here
             return Ok(RedisType::Delay(Message::new(
                 request_params[3].parse::<u64>().unwrap(),
-                request_params[0],
+                request_params[0].to_string(),
             )));
         }
 
@@ -118,17 +119,17 @@ pub async fn get_redis_response<'a>(
         path.push_str("/");
         path.push_str(&data.lock().await.get("dir").unwrap());
 
-        let regex_expression: &str = extract_regex(&request, index)[1].clone();
+        let _regex_expression: &str = extract_regex(&request, index)[1];
 
         let mut keys: Vec<RedisType> = Vec::new();
 
         let contents: String = match fs::read_to_string(path).await {
             Ok(file) => file,
-            Err(_) => return Ok(RedisType::Error("Error finding file")),
+            Err(_) => return Ok(RedisType::Error("Error finding file".to_string())),
         };
-        let mut my_file: File = match File::create("input.txt").await {
+        let _my_file: File = match File::create("input.txt").await {
             Ok(file) => file,
-            Err(_) => return Ok(RedisType::Error("Error creating file")),
+            Err(_) => return Ok(RedisType::Error("Error creating file".to_string())),
         };
 
         if contents.contains("FC") {
@@ -137,7 +138,7 @@ pub async fn get_redis_response<'a>(
 
         println!("File contents: {}", contents);
 
-        let index: usize = request
+        let _index: usize = request
             .iter()
             .position(|&s| s.to_uppercase() == "KEYS")
             .unwrap()
@@ -192,22 +193,22 @@ fn extract_regex<'a>(req: &'a Vec<&str>, start: usize) -> Vec<&'a str> {
     return req_msg;
 }
 
-impl<'a> Message<'a> {
-    pub fn new(time: u64, key: &'a str) -> Self {
+impl Message {
+    pub fn new(time: u64, key: String) -> Self {
         return Message { key, time };
     }
 }
 
-impl<'a> Clone for Message<'a> {
+impl Clone for Message {
     fn clone(&self) -> Self {
         return Message {
-            key: self.key,
+            key: self.key.clone(),
             time: self.time,
         };
     }
 }
 
-impl<'a> PartialEq for Message<'a> {
+impl PartialEq for Message {
     fn eq(&self, other: &Self) -> bool {
         return self.key == other.key && self.time == other.time;
     }
@@ -458,7 +459,7 @@ mod tests {
 
     #[test]
     fn error_test() {
-        let my_error: RedisType = RedisType::Error("Err unknown command");
+        let my_error: RedisType = RedisType::Error("Err unknown command".to_string());
         assert_eq!(my_error.to_string(), "-Err unknown command\r\n");
     }
 
