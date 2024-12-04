@@ -11,16 +11,16 @@ impl Database {
         };
     }
 
-    pub fn add(&mut self, key: String, value: String) {
-        self.data.insert(key, value);
+    pub fn add(&mut self, key: &str, value: &str) {
+        self.data.insert(key.to_string(), value.to_string());
     }
 
-    pub fn get(&self, key: String) -> Option<&String> {
-        return self.data.get(&key);
+    pub fn get(&self, key: &str) -> Option<String> {
+        return Some(self.data.get(key).unwrap().clone());
     }
 
-    pub fn remove(&mut self, key: String) {
-        self.data.remove(&key);
+    pub fn remove(&mut self, key: &str) {
+        self.data.remove(key);
     }
 
     pub fn try_get(&self, key: &str) -> Option<()> {
@@ -31,11 +31,6 @@ impl Database {
     }
 
     pub fn get_keys(&self) -> Vec<String> {
-        return self
-            .data
-            .iter()
-            .skip(2)
-            .map(|(k, _)| k.to_string())
-            .collect();
+        return self.data.iter().skip(2).map(|(k, _)| k.clone()).collect();
     }
 }
