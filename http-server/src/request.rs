@@ -29,6 +29,29 @@ impl HttpMethod {
     }
 }
 
+impl PartialEq for HttpMethod {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            HttpMethod::GET => match other {
+                HttpMethod::GET => true,
+                _ => false,
+            },
+            HttpMethod::POST => match other {
+                HttpMethod::POST => true,
+                _ => false,
+            },
+            HttpMethod::PUT => match other {
+                HttpMethod::PUT => true,
+                _ => false,
+            },
+            HttpMethod::DELETE => match other {
+                HttpMethod::DELETE => true,
+                _ => false,
+            },
+        }
+    }
+}
+
 impl Request {
     pub fn new(request: String) -> Result<Self, ServerError> {
         let request: Vec<String> = Self::seporate_request(request)?;
@@ -64,7 +87,9 @@ impl Request {
         let mut req: Vec<String> = Vec::with_capacity(request_length);
 
         for r in request.split("\r\n") {
-            req.push(r.to_string());
+            let temp: String = r.to_string().trim().to_string();
+            println!("{}", temp);
+            req.push(temp);
         }
 
         return Ok(req);

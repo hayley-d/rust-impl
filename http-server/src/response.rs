@@ -1,8 +1,9 @@
 use std::fmt::Display;
 
-use tokio::fs;
+use tokio::fs::{self, File};
+use tokio::io::AsyncWriteExt;
 
-use crate::Request;
+use crate::{HttpMethod, Request};
 
 pub struct Response {
     pub message: String,
@@ -75,6 +76,62 @@ pub async fn get_response(request: String) -> Response {
         }
     };
 
+    match request.method {
+        HttpMethod::GET => handle_get(request).await,
+        HttpMethod::POST => handle_post(request).await,
+        _ => Response {
+            message: String::from("I'm a teapot"),
+            code: Code::Teapot,
+            content_type: ContentType::Text,
+        },
+    }
+}
+
+async fn handle_post(request: Request) -> Response {
+    if request.uri.contains("/files/") {
+    } else {
+        return Response {
+            message: String::from("Not found"),
+            code: Code::NotFound,
+            content_type: ContentType::Text,
+        };
+    }
+
+    let path: String = match request.get_file_path() {
+        Ok(p) => p,
+        Err(_) => {
+            return Response {
+                message: String::from("Not found"),
+                code: Code::NotFound,
+                content_type: ContentType::Text,
+            };
+        }
+    };
+
+    let mut file = File::create(path).await.unwrap();
+
+    let content =
+        &request.request_headers[request.request_headers.len() - 1].trim_end_matches('\0');
+    let bytes = content.as_bytes();
+
+    match file.write_all(bytes).await {
+        Ok(_) => (),
+        Err(_) => {
+            return Response {
+                message: String::from("Internal Server Error"),
+                code: Code::InternalServerError,
+                content_type: ContentType::Text,
+            };
+        }
+    };
+
+    return Response {
+        message: String::from("Created file"),
+        code: Code::Created,
+        content_type: ContentType::Text,
+    };
+}
+async fn handle_get(request: Request) -> Response {
     if request.uri == "/" {
         return Response {
             message: String::from("OK"),
@@ -139,6 +196,7 @@ pub async fn get_response(request: String) -> Response {
 
 pub enum Code {
     Ok,
+    Created,
     InternalServerError,
     Unauthorized,
     NotFound,
@@ -150,6 +208,7 @@ impl Code {
     pub fn to_code(&self) -> String {
         match self {
             Code::Ok => String::from(200.to_string()),
+            Code::Created => String::from(201.to_string()),
             Code::InternalServerError => String::from(500.to_string()),
             Code::Unauthorized => String::from(401.to_string()),
             Code::NotFound => String::from(404.to_string()),
@@ -163,6 +222,7 @@ impl Display for Code {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Code::Ok => write!(f, "OK"),
+            Code::Created => write!(f, "Created"),
             Code::InternalServerError => write!(f, "Internal Server Error"),
             Code::NotFound => write!(f, "Not Found"),
             Code::Unauthorized => write!(f, "Unauthorized"),
