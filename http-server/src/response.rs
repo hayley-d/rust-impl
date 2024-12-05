@@ -5,6 +5,7 @@ use crate::ServerError;
 pub struct Response {
     pub message: String,
     pub code: Code,
+    pub content_type: ContentType,
 }
 
 pub enum HttpMethod {
@@ -14,10 +15,32 @@ pub enum HttpMethod {
     DELETE,
 }
 
+pub enum ContentType {
+    Text,
+    Html,
+    Json,
+}
+
 pub struct Request {
     pub request_line: String,
     pub method: HttpMethod,
     pub uri: String,
+}
+
+impl Display for ContentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContentType::Text => {
+                write!(f, "text/plain")
+            }
+            ContentType::Html => {
+                write!(f, "text/html")
+            }
+            ContentType::Json => {
+                write!(f, "application/json")
+            }
+        }
+    }
 }
 
 impl HttpMethod {
@@ -58,9 +81,12 @@ impl Display for Response {
             Code::Ok => {
                 write!(
                     f,
-                    "HTTP/1.1 {} {}\r\n\r\n",
+                    "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
                     self.code.to_code(),
-                    self.code.to_string()
+                    self.code,
+                    self.content_type,
+                    self.message.len(),
+                    self.message
                 )
             }
             _ => {
@@ -83,6 +109,7 @@ pub fn get_response(request: String) -> Response {
             return Response {
                 message: String::from("I'm a teapot"),
                 code: Code::Teapot,
+                content_type: ContentType::Text,
             }
         }
     };
@@ -91,11 +118,23 @@ pub fn get_response(request: String) -> Response {
         return Response {
             message: String::from("OK"),
             code: Code::Ok,
+            content_type: ContentType::Text,
+        };
+    }
+    if request.uri.to_lowercase().contains("echo") {
+        let parts: Vec<&str> = request.uri.split("/").collect();
+        let message: String = parts[parts.len() - 1].to_string();
+
+        return Response {
+            message,
+            code: Code::Ok,
+            content_type: ContentType::Text,
         };
     } else {
         return Response {
             message: String::from("Not found"),
             code: Code::NotFound,
+            content_type: ContentType::Text,
         };
     }
 }
