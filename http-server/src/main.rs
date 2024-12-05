@@ -1,5 +1,7 @@
+use core::str;
+
 use codecrafters_http_server::error::*;
-use codecrafters_http_server::response::{Code, Response};
+use codecrafters_http_server::response::{get_response, Code, Response};
 #[allow(unused_imports)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -46,11 +48,7 @@ async fn main() -> Result<(), ServerError> {
                     }
                 };
 
-                let response = Response {
-                    message: String::from("Ok"),
-                    code: Code::Ok,
-                };
-
+                let response = get_response(str::from_utf8(&buffer[..]).unwrap().to_string());
                 let response = response.to_string();
 
                 if let Err(e) = client.write(response.as_bytes()).await {
