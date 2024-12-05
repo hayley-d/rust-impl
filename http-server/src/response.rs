@@ -1,9 +1,8 @@
-use std::env;
 use std::fmt::Display;
 
 use tokio::fs;
 
-use crate::ServerError;
+use crate::Request;
 
 pub struct Response {
     pub message: String,
@@ -92,8 +91,9 @@ pub async fn get_response(request: String) -> Response {
             content_type: ContentType::Text,
         };
     } else if request.uri.to_lowercase().contains("user-agent") {
-        let user_agent: Vec<&str> = request.request[2].split_whitespace().collect();
-        let user_agent: &str = user_agent[1];
+        let user_agent: &str = request.request_headers[1]
+            .split_whitespace()
+            .collect::<Vec<&str>>()[1];
 
         return Response {
             message: user_agent.to_string(),
@@ -101,9 +101,8 @@ pub async fn get_response(request: String) -> Response {
             content_type: ContentType::Text,
         };
     } else if request.uri.to_lowercase().contains("files") {
-        let request = &request.request[0];
-        let (_, uri, _) = match parse_request_line(request) {
-            Ok((t, u, p)) => (t, u, p),
+        let path: String = match request.get_file_path() {
+            Ok(p) => p,
             Err(_) => {
                 return Response {
                     message: String::from("Not found"),
@@ -112,24 +111,6 @@ pub async fn get_response(request: String) -> Response {
                 };
             }
         };
-        let parts: Vec<&str> = uri.split("/").collect();
-
-        let file_name: &str = parts[parts.len() - 1];
-
-        let args: Vec<String> = env::args().collect();
-
-        if args.len() < 2 {
-            return Response {
-                message: String::from("Not found"),
-                code: Code::NotFound,
-                content_type: ContentType::Text,
-            };
-        }
-
-        let dir: &String = &args[2];
-        let mut path: String = String::new();
-        path.push_str(dir);
-        path.push_str(file_name);
 
         let contents: String = match fs::read_to_string(path).await {
             Ok(c) => c,
