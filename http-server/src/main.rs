@@ -1,7 +1,6 @@
-use core::str;
-
 use codecrafters_http_server::error::*;
-use codecrafters_http_server::response::{get_response, Code, Response};
+use codecrafters_http_server::response::get_response;
+use core::str;
 #[allow(unused_imports)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -18,7 +17,7 @@ async fn main() -> Result<(), ServerError> {
     };
 
     loop {
-        let (mut client, addr) = match listener.accept().await {
+        let (mut client, _) = match listener.accept().await {
             Ok((s, a)) => {
                 println!("Accepted connection at {}", a);
                 (s, a)
@@ -34,7 +33,7 @@ async fn main() -> Result<(), ServerError> {
             let mut buffer: [u8; 4096] = [0; 4096];
 
             loop {
-                let n = match client.read(&mut buffer).await {
+                let _n = match client.read(&mut buffer).await {
                     Ok(n) if n == 0 => return,
                     Ok(n) => n,
                     Err(_) => {
@@ -48,7 +47,7 @@ async fn main() -> Result<(), ServerError> {
                     }
                 };
 
-                let response = get_response(str::from_utf8(&buffer[..]).unwrap().to_string());
+                let response = get_response(str::from_utf8(&buffer[..]).unwrap().to_string()).await;
                 let response = response.to_string();
 
                 if let Err(e) = client.write(response.as_bytes()).await {
