@@ -22,7 +22,7 @@ pub enum ContentType {
 }
 
 pub struct Request {
-    pub request_line: String,
+    pub request: Vec<String>,
     pub method: HttpMethod,
     pub uri: String,
 }
@@ -68,7 +68,7 @@ impl Request {
         }
         let method: HttpMethod = HttpMethod::get_method(&method);
         return Ok(Request {
-            request_line: request[0].clone(),
+            request,
             method,
             uri,
         });
@@ -120,13 +120,21 @@ pub fn get_response(request: String) -> Response {
             code: Code::Ok,
             content_type: ContentType::Text,
         };
-    }
-    if request.uri.to_lowercase().contains("echo") {
+    } else if request.uri.to_lowercase().contains("echo") {
         let parts: Vec<&str> = request.uri.split("/").collect();
         let message: String = parts[parts.len() - 1].to_string();
 
         return Response {
             message,
+            code: Code::Ok,
+            content_type: ContentType::Text,
+        };
+    } else if request.uri.to_lowercase().contains("user-agent") {
+        let user_agent: Vec<&str> = request.request[2].split_whitespace().collect();
+        let user_agent: &str = user_agent[1];
+
+        return Response {
+            message: user_agent.to_string(),
             code: Code::Ok,
             content_type: ContentType::Text,
         };
