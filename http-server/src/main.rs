@@ -48,9 +48,8 @@ async fn main() -> Result<(), ServerError> {
                 };
 
                 let response = get_response(str::from_utf8(&buffer[..]).unwrap().to_string()).await;
-                let response = response.to_string();
 
-                if let Err(e) = client.write(response.as_bytes()).await {
+                if let Err(e) = client.write(&response.to_bytes()).await {
                     eprintln!("Error: {:?}", e);
                     return;
                 }

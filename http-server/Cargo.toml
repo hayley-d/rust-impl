@@ -1,6 +1,9 @@
 [package]
-name = "http-server"
+name = "codecrafters-http-server"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tokio = { version = "1.42.0", features = ["full"] }
+flate2 = "1.0.35"
+chrono = "0.4.38"

@@ -1,5 +1,9 @@
+use chrono::{DateTime, Utc};
+use core::str;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::fmt::Display;
-
+use std::io::Write;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 
@@ -35,6 +39,47 @@ impl Display for ContentType {
                 write!(f, "application/octet-stream")
             }
         }
+    }
+}
+
+impl Response {
+    /// Converts the `Response` into a `Vec<u8>` suitable for sending over a TCP stream.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        // Response line: HTTP/1.1 <status code>
+        let response_line: String = format!("HTTP/1.1 {}\r\n", self.code);
+
+        // Date Header
+        let now: DateTime<Utc> = Utc::now();
+        let date = now.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
+
+        let mut headers: Vec<String> = vec![
+            format!("Server: Ferriscuit"),
+            format!("Date: {}", date),
+            format!("Cache-Control: no-cache"),
+            format!("Content-Type: {}", self.content_type),
+        ];
+
+        let body: Vec<u8>;
+
+        if !self.compression {
+            body = self.message.clone().into();
+        } else {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder
+                .write_all(&self.message.clone().into_bytes())
+                .expect("Failed to write body to gzip encoder");
+            body = encoder.finish().expect("Failed to finish gzip compression");
+            headers.push(format!("Content-Encoding: gzip"));
+        }
+        headers.push(format!("Content-Length: {}", body.len()));
+
+        let mut response = Vec::new();
+        response.extend_from_slice(response_line.as_bytes());
+        response.extend_from_slice(headers.join("\r\n").as_bytes());
+        response.extend_from_slice(b"\r\n\r\n");
+        response.extend_from_slice(&body);
+
+        return response;
     }
 }
 
@@ -247,13 +292,13 @@ impl Code {
 impl Display for Code {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Code::Ok => write!(f, "OK"),
-            Code::Created => write!(f, "Created"),
-            Code::InternalServerError => write!(f, "Internal Server Error"),
-            Code::NotFound => write!(f, "Not Found"),
-            Code::Unauthorized => write!(f, "Unauthorized"),
-            Code::BadRequest => write!(f, "Bad Request"),
-            Code::Teapot => write!(f, "I'm a teapot"),
+            Code::Ok => write!(f, "200 OK"),
+            Code::Created => write!(f, "201 Created"),
+            Code::InternalServerError => write!(f, "500 Internal Server Error"),
+            Code::NotFound => write!(f, "404 Not Found"),
+            Code::Unauthorized => write!(f, "401 Unauthorized"),
+            Code::BadRequest => write!(f, "400 Bad Request"),
+            Code::Teapot => write!(f, "418 I'm a teapot"),
         }
     }
 }
