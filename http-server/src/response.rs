@@ -9,6 +9,7 @@ pub struct Response {
     pub message: String,
     pub code: Code,
     pub content_type: ContentType,
+    pub compression: bool,
 }
 
 pub enum ContentType {
@@ -41,15 +42,27 @@ impl Display for Response {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.code {
             Code::Ok => {
-                write!(
-                    f,
-                    "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
-                    self.code.to_code(),
-                    self.code,
-                    self.content_type,
-                    self.message.len(),
-                    self.message
-                )
+                if !self.compression {
+                    write!(
+                        f,
+                        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
+                        self.code.to_code(),
+                        self.code,
+                        self.content_type,
+                        self.message.len(),
+                        self.message
+                    )
+                } else {
+                    write!(
+                        f,
+                        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
+                        self.code.to_code(),
+                        self.code,
+                        self.content_type,
+                        self.message.len(),
+                        self.message
+                    )
+                }
             }
             _ => {
                 write!(
@@ -72,6 +85,7 @@ pub async fn get_response(request: String) -> Response {
                 message: String::from("I'm a teapot"),
                 code: Code::Teapot,
                 content_type: ContentType::Text,
+                compression: false,
             }
         }
     };
@@ -83,6 +97,7 @@ pub async fn get_response(request: String) -> Response {
             message: String::from("I'm a teapot"),
             code: Code::Teapot,
             content_type: ContentType::Text,
+            compression: false,
         },
     }
 }
@@ -94,6 +109,7 @@ async fn handle_post(request: Request) -> Response {
             message: String::from("Not found"),
             code: Code::NotFound,
             content_type: ContentType::Text,
+            compression: false,
         };
     }
 
@@ -104,6 +120,7 @@ async fn handle_post(request: Request) -> Response {
                 message: String::from("Not found"),
                 code: Code::NotFound,
                 content_type: ContentType::Text,
+                compression: false,
             };
         }
     };
@@ -121,6 +138,7 @@ async fn handle_post(request: Request) -> Response {
                 message: String::from("Internal Server Error"),
                 code: Code::InternalServerError,
                 content_type: ContentType::Text,
+                compression: false,
             };
         }
     };
@@ -129,6 +147,7 @@ async fn handle_post(request: Request) -> Response {
         message: String::from("Created file"),
         code: Code::Created,
         content_type: ContentType::Text,
+        compression: false,
     };
 }
 async fn handle_get(request: Request) -> Response {
@@ -137,6 +156,7 @@ async fn handle_get(request: Request) -> Response {
             message: String::from("OK"),
             code: Code::Ok,
             content_type: ContentType::Text,
+            compression: request.is_compression_supported(),
         };
     } else if request.uri.to_lowercase().contains("echo") {
         let parts: Vec<&str> = request.uri.split("/").collect();
@@ -146,6 +166,7 @@ async fn handle_get(request: Request) -> Response {
             message,
             code: Code::Ok,
             content_type: ContentType::Text,
+            compression: request.is_compression_supported(),
         };
     } else if request.uri.to_lowercase().contains("user-agent") {
         let user_agent: &str = request.request_headers[1]
@@ -156,6 +177,7 @@ async fn handle_get(request: Request) -> Response {
             message: user_agent.to_string(),
             code: Code::Ok,
             content_type: ContentType::Text,
+            compression: request.is_compression_supported(),
         };
     } else if request.uri.to_lowercase().contains("files") {
         let path: String = match request.get_file_path() {
@@ -165,6 +187,7 @@ async fn handle_get(request: Request) -> Response {
                     message: String::from("Not found"),
                     code: Code::NotFound,
                     content_type: ContentType::Text,
+                    compression: false,
                 };
             }
         };
@@ -176,6 +199,7 @@ async fn handle_get(request: Request) -> Response {
                     message: String::from("Not found"),
                     code: Code::NotFound,
                     content_type: ContentType::Text,
+                    compression: false,
                 };
             }
         };
@@ -184,12 +208,14 @@ async fn handle_get(request: Request) -> Response {
             message: contents,
             code: Code::Ok,
             content_type: ContentType::Octet,
+            compression: request.is_compression_supported(),
         };
     } else {
         return Response {
             message: String::from("Not found"),
             code: Code::NotFound,
             content_type: ContentType::Text,
+            compression: false,
         };
     }
 }

@@ -133,4 +133,20 @@ impl Request {
 
         return Ok(path);
     }
+
+    pub fn is_compression_supported(&self) -> bool {
+        for header in &self.request_headers {
+            if header.to_lowercase().contains("accept-encoding") {
+                if header
+                    .to_lowercase()
+                    .split_whitespace()
+                    .collect::<Vec<&str>>()[1]
+                    == "gzip"
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }
